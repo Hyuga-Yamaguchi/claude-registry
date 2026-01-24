@@ -518,6 +518,132 @@ async def get_markets(request: Request):
     return {"success": True, "data": []}
 ```
 
+## Logging Patterns
+
+### Never Log Secrets or PII
+
+Must not log:
+- Passwords, API keys, tokens
+- Email addresses, names, phone numbers
+- Full request/response bodies
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ❌ BAD: Logging PII or secrets
+logger.info(f"User: {user.email}")
+logger.debug(f"API key: {api_key}")
+
+# ✅ GOOD: Log events without sensitive data
+logger.info("User logged in", extra={"user_id": user.id})
+```
+
+### Prefer Structured Logging and Lazy Formatting
+
+Use `extra` for structured data. Use lazy formatting (%) for performance.
+
+```python
+# ✅ GOOD: Structured logging (preferred)
+logger.info(
+    "Order created",
+    extra={
+        "order_id": order.id,
+        "user_id": order.user_id,
+        "total": str(order.total),
+    },
+)
+
+# ✅ GOOD: Lazy formatting (recommended for simple cases)
+logger.info("Order %s created for user %s", order.id, order.user_id)
+
+# ⚠️ Acceptable but not preferred: f-strings (eagerly evaluated)
+logger.info(f"Order {order.id} created")
+```
+
+### Use logger.exception() for Unexpected Errors
+
+```python
+try:
+    process_payment(order)
+except PaymentError:
+    logger.exception("Payment failed", extra={"order_id": order.id})
+    raise
+```
+
+## Security Best Practices
+
+### Never Build SQL with String Concatenation
+
+Use parameterized queries. Parameter style varies by driver.
+
+**SQLAlchemy (recommended for FastAPI)**:
+
+```python
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+async def get_user(user_id: str, db: AsyncSession) -> User | None:
+    query = text("SELECT * FROM users WHERE id = :user_id")
+    result = await db.execute(query, {"user_id": user_id})
+    return result.fetchone()
+```
+
+**asyncpg (PostgreSQL)**:
+
+```python
+import asyncpg
+
+async def get_user(user_id: str, conn: asyncpg.Connection) -> dict | None:
+    return await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+```
+
+**Never**:
+
+```python
+# ❌ BAD: SQL injection vulnerability
+query = f"SELECT * FROM users WHERE id = '{user_id}'"
+```
+
+### Never Use shell=True
+
+```python
+import subprocess
+
+# ✅ GOOD: Safe subprocess execution
+subprocess.run(["ls", "-l", filename], capture_output=True, check=True)
+
+# ❌ BAD: Command injection vulnerability
+subprocess.run(f"ls -l {filename}", shell=True)
+```
+
+### Do Not Deserialize Untrusted Pickle
+
+```python
+import json
+import pickle
+
+# ❌ BAD: Code execution vulnerability
+data = pickle.loads(untrusted_bytes)
+
+# ✅ GOOD: Use JSON for untrusted data
+data = json.loads(untrusted_string)
+```
+
+### Secrets from Environment
+
+```python
+import os
+
+# ✅ GOOD: Load secrets from environment
+API_KEY = os.environ["API_KEY"]
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# ❌ BAD: Hardcoded secrets (exposed in git)
+API_KEY = "sk-1234..."
+```
+
 ## Async Database Operations
 
 ```python
