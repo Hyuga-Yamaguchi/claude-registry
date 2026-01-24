@@ -235,8 +235,15 @@ export const queryClient = new QueryClient({
   mutationCache: new MutationCache({
     onError: (error, _vars, _ctx, mutation) => {
       if (mutation.meta?.toastError) {
-        if (error.status === 401 || error.status === 403 || error.status === 422) return
-        toast.error(error.message)
+        if (error instanceof ApiError) {
+          // Don't toast auth errors (handled by UI) or validation errors (handled by forms)
+          if (error.status === 401 || error.status === 403 || error.status === 422) return
+          toast.error(error.message)
+        } else {
+          // Non-ApiError: log and show generic message
+          console.error('Unexpected mutation error:', error)
+          toast.error('An unexpected error occurred')
+        }
       }
     },
   }),
@@ -246,7 +253,11 @@ export const queryClient = new QueryClient({
 })
 
 // features/settings/hooks/mutations/use-add-department.ts (EXAMPLE)
-import type { Department } from '../types'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { settingsApi } from '../../api/settings.api'
+import { settingsKeys } from '../keys'
+import type { Department } from '../../types'
 import type { Command } from '@/app/events/types'
 
 export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void }) {
@@ -286,6 +297,10 @@ export class ApiError extends Error {
 ```
 
 ### HTTP Wrapper (Type-safe + FormData support)
+
+**httpJson Contract**: Endpoints using `httpJson` MUST return JSON (including 200 responses). For 204 No Content, use explicit status handling. For non-JSON responses, use `httpText()` or raw `fetch()`.
+
+**Usage**: `httpJson` is for JSON request/response only. For FormData/Blob/URLSearchParams, use `fetch()` directly (FormData sets its own Content-Type with boundary).
 
 ```typescript
 // lib/http.ts
@@ -373,6 +388,10 @@ export const settingsKeys = {
 
 ```typescript
 // features/settings/hooks/queries/use-accounts.ts (EXAMPLE)
+import { useQuery } from '@tanstack/react-query'
+import { settingsApi } from '../../api/settings.api'
+import { settingsKeys } from '../keys'
+
 export function useAccounts() {
   return useQuery({
     queryKey: settingsKeys.accounts(),
@@ -400,7 +419,10 @@ const { data: activeAccounts } = useQuery({
 
 ```typescript
 // features/settings/hooks/mutations/use-delete-account.ts (EXAMPLE)
-import type { Account } from '../types'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { settingsApi } from '../../api/settings.api'
+import { settingsKeys } from '../keys'
+import type { Account } from '../../types'
 
 export function useDeleteAccount() {
   const queryClient = useQueryClient()
@@ -638,6 +660,8 @@ function ProjectList({ projects }: { projects: Project[] }) {
 }
 ```
 
+**⚠️ Cache Size Management**: Module-level Maps grow unbounded. For user-generated inputs, add size limits (e.g., `if (cache.size > 1000) cache.clear()`) or use LRU cache libraries to prevent memory leaks.
+
 **Combine multiple array iterations into one loop.**
 
 ```typescript
@@ -821,9 +845,13 @@ export const userQueryOptions = queryOptions({
 })
 ```
 
-**⚠️ CSRF Protection**: When using HttpOnly cookies, implement CSRF protection (SameSite=Strict/Lax + CSRF token for state-changing requests). Modern frameworks (Next.js API routes, etc.) often handle this automatically.
+**⚠️ CSRF Protection**: When using HttpOnly cookies, implement CSRF protection (SameSite=Strict/Lax + CSRF token for state-changing requests). Common patterns: double submit cookie (server sets token in cookie + custom header), or synchronizer token (server embeds token in page, client sends in header). Modern frameworks (Next.js API routes, etc.) often handle this automatically.
+
+**⚠️ Cross-Origin Cookies**: For cross-origin requests with credentials, set `credentials: 'include'` in fetch options and configure CORS properly on the server (Access-Control-Allow-Credentials: true).
 
 ### Authorization (RBAC/PBAC)
+
+**⚠️ Server-Side Validation Required**: UI authorization checks (like `<Authorization>` component) are for UX only. The server MUST validate all permissions for every request—never trust client-side checks.
 
 ```typescript
 // lib/authorization.tsx (EXAMPLE)
