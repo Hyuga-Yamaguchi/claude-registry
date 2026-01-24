@@ -42,7 +42,7 @@ For language-level TypeScript standards, see [coding-standards-typescript.md](co
 ### State Management
 
 - **[TanStack Query](https://tanstack.com/query)** (v5): Server state (required)
-- **[zustand](https://github.com/pmndrs/zustand)** or **[jotai](https://jotai.org/)**: Application state (minimal, UI-only)
+- **[jotai](https://jotai.org/)**: Application state (minimal, UI-only, Reagent-style atoms)
 
 ### Forms & Validation
 
@@ -80,7 +80,7 @@ src/
 │   ├── events/             # Event handlers (re-frame style)
 │   ├── effects/            # Effect implementations (analytics, logging)
 │   ├── subs/               # Cross-feature subscriptions (derived data)
-│   ├── store/              # Application state (zustand/jotai)
+│   ├── store/              # Application state (jotai atoms)
 │   └── provider.tsx        # Root providers (QueryClient, Router, etc)
 │
 ├── features/               # Feature modules (domain-driven, isolated)
@@ -562,24 +562,33 @@ function SearchBar() {
 
 ### Application State: app/store/ (Small and Minimal)
 
-**Use zustand/jotai for small cross-page UI state only when necessary.**
+**Use jotai for small cross-page UI state only when necessary.**
 
 ```typescript
-// app/store/ui.store.ts
-import { create } from 'zustand'
+// app/store/ui.atoms.ts
+import { atom, useAtom } from 'jotai'
 
-interface UIState {
-  sidebarOpen: boolean
-  toggleSidebar: () => void
+// Primitive atoms (like Reagent subscriptions)
+export const sidebarOpenAtom = atom(true)
+export const themeAtom = atom<'light' | 'dark'>('light')
+
+// Derived atom (computed state)
+export const isDarkModeAtom = atom((get) => get(themeAtom) === 'dark')
+
+// Usage: Subscribe & Render
+function Sidebar() {
+  const [isOpen, setIsOpen] = useAtom(sidebarOpenAtom)
+  const [isDark] = useAtom(isDarkModeAtom)
+
+  return (
+    <aside className={isDark ? 'dark' : 'light'}>
+      <button onClick={() => setIsOpen(!isOpen)}>Toggle</button>
+    </aside>
+  )
 }
 
-export const useUIStore = create<UIState>((set) => ({
-  sidebarOpen: true,
-  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-}))
-
-// ❌ BAD: Don't put server state in store
-// accounts: Account[]  // Should be managed by TanStack Query
+// ❌ BAD: Don't put server state in atoms
+// const accountsAtom = atom<Account[]>([])  // Should be managed by TanStack Query
 ```
 
 ---
