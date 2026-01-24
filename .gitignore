@@ -33,7 +33,7 @@ todos/
 plans/
 
 # Reference materials
-everithing-claude-code-references/
+everything-claude-code-references/
 
 # Plugins directory - only track README.md
 plugins/*
