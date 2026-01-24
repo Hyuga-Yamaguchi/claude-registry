@@ -841,4 +841,142 @@ export function Modal({ isOpen, onClose, children }: ModalProps) {
 
 ---
 
+## Testing
+
+**Focus on integration tests. Unit tests for shared components/utils only.**
+
+### Test Priority
+
+1. **Integration Tests** (Primary): Test features as users interact
+2. **E2E Tests**: Test critical user flows
+3. **Unit Tests**: Shared components/utils only
+
+### Tools
+
+- **[Vitest](https://vitest.dev)**: Test runner
+- **[Testing Library](https://testing-library.com/)**: Test user behavior
+- **[Playwright](https://playwright.dev)**: E2E automation
+- **[MSW](https://mswjs.io)**: Mock API server
+
+### Example
+
+```typescript
+// features/settings/components/__tests__/account-list.test.tsx
+import { render, screen, waitFor } from '@testing-library/react'
+import { userEvent } from '@testing-library/user-event'
+
+test('deletes account on click', async () => {
+  render(<AccountListContainer />)
+
+  await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument())
+
+  await userEvent.click(screen.getByRole('button', { name: /delete/i }))
+
+  await waitFor(() => expect(screen.queryByText('John Doe')).not.toBeInTheDocument())
+})
+```
+
+---
+
+## Security
+
+### Authentication
+
+**Use JWT. Prefer HttpOnly cookies over localStorage (XSS protection).**
+
+```typescript
+// lib/auth.tsx
+const getUser = async () => {
+  const res = await fetch('/api/auth/me') // Token via HttpOnly cookie
+  if (!res.ok) return null
+  return res.json()
+}
+
+export const userQueryOptions = queryOptions({
+  queryKey: ['auth', 'user'],
+  queryFn: getUser,
+  staleTime: Infinity,
+})
+
+export function useUser() {
+  return useQuery(userQueryOptions)
+}
+```
+
+### Authorization
+
+**RBAC (Role-Based) and PBAC (Permission-Based)**
+
+```typescript
+// lib/authorization.tsx
+export function Authorization({ allowedRoles, policyCheck, children }: AuthorizationProps) {
+  const { data: user } = useUser()
+  if (!user) return null
+
+  // RBAC: Role check
+  if (allowedRoles && !allowedRoles.includes(user.role)) return null
+
+  // PBAC: Policy check (granular, e.g. owner-only delete)
+  if (policyCheck !== undefined && !policyCheck) return null
+
+  return <>{children}</>
+}
+
+// Usage
+<Authorization allowedRoles={['admin']}>
+  <AdminPanel />
+</Authorization>
+
+<Authorization policyCheck={comment.authorId === user?.id}>
+  <DeleteButton />
+</Authorization>
+```
+
+### XSS Protection
+
+**Sanitize user input with DOMPurify.**
+
+```typescript
+import DOMPurify from 'dompurify'
+
+export function MDPreview({ content }: { content: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
+}
+```
+
+---
+
+## Project Standards
+
+### Tooling
+
+- **ESLint**: Code quality, **Prettier**: Auto-format, **TypeScript**: Type safety (required), **Husky**: Pre-commit hooks
+
+### Absolute Imports
+
+**Configure `@/*` path alias.**
+
+```json
+// tsconfig.json
+{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } } }
+```
+
+```typescript
+// ✅ GOOD
+import { Card } from '@/components/ui/card'
+
+// ❌ BAD
+import { Card } from '../../../components/ui/card'
+```
+
+### File Naming
+
+**Use kebab-case. Enforce with ESLint `check-file` plugin.**
+
+```
+user-settings/components/account-list.tsx
+```
+
+---
+
 **Remember**: Write working code first. Optimize after measuring. Add complexity only when needed. Use bulletproof structure for organization, re-frame principles for behavior.
