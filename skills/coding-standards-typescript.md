@@ -18,6 +18,8 @@ Language-level standards for TypeScript. Framework-specific patterns in frontend
 }
 ```
 
+**Note**: `noUncheckedIndexedAccess` treats array/dictionary access as `T | undefined`, improving null safety.
+
 ## Naming Conventions
 
 **Variables/Functions**: Descriptive names, verb-noun pattern for functions, `is`/`has`/`should`/`can` prefix for booleans.
@@ -94,11 +96,6 @@ const config: Config = loadConfig()  // Validates return type
 Validates type conformance while preserving inferred type precision.
 
 ```typescript
-interface Config {
-  endpoint: string
-  timeout: number
-}
-
 const config = {
   endpoint: 'data/source',
   timeout: 5000
@@ -116,11 +113,6 @@ Creates deeply readonly literal types.
 ```typescript
 const STATUSES = ['pending', 'active', 'archived'] as const
 type Status = typeof STATUSES[number]  // 'pending' | 'active' | 'archived'
-
-const CONFIG = {
-  maxRetries: 3,
-  timeoutMs: 5000
-} as const
 ```
 
 ### Optional (`?`) vs `| undefined`
@@ -128,28 +120,17 @@ const CONFIG = {
 **Type-level similarity, call-site difference**: Both permit `undefined` values, but `?` allows omission while `| undefined` requires explicit argument.
 
 ```typescript
-// Optional: can omit argument
 function greet(name?: string): void {
   console.log(name ?? 'Guest')
 }
 greet()  // OK
 greet(undefined)  // OK
 
-// Explicit undefined: must provide argument
 function setConfig(value: Config | undefined): void {
   // undefined signals "clear config"
 }
 setConfig(undefined)  // OK
 setConfig()  // ❌ Error: Expected 1 argument
-```
-
-**Object properties**: Prefer `?` for optional fields.
-
-```typescript
-interface User {
-  id: string
-  email?: string
-}
 ```
 
 **Key insight**: `?` signals "may be absent". `| undefined` signals "undefined is a meaningful value".
@@ -158,7 +139,7 @@ interface User {
 
 ### Use `import type` for Type-Only Imports
 
-Eliminates runtime coupling and helps avoid module instantiation cycles.
+Avoids emitting runtime imports for types. Reduces accidental runtime coupling and helps avoid circular import pitfalls.
 
 ```typescript
 // ✅ Type-only import
@@ -169,13 +150,13 @@ import { fetchUser } from './api'
 import { User, Product } from './models'  // Runtime coupling
 ```
 
-**Guideline**: Default to `import type` when importing only types. This clarifies intent and reduces circular dependency risks.
+**Guideline**: Default to `import type` when importing only types.
 
 ## Immutability and `readonly`
 
-### Design with `readonly` by Default
+### Design with Immutability by Default
 
-Consider immutability during interface design, not just at usage sites.
+Consider immutability during interface design. Favor `readonly` unless mutation is justified.
 
 ```typescript
 // ✅ Immutable by design
@@ -184,18 +165,17 @@ interface Config {
   readonly timeout: number
 }
 
-function updateConfig(config: Config): Config {
+function updateConfig(config: Readonly<Config>): Config {
   return { ...config, timeout: 10000 }
 }
 
 // ✅ Function parameters
 function process(items: readonly Item[]): Item[] {
-  // items.push(x)  // ❌ Compile error
   return [...items, newItem]
 }
 ```
 
-**Guideline**: Start with `readonly` and remove only when mutation is necessary. This catches unintended mutations early.
+**Guideline**: Start with `readonly` and remove only when mutation is necessary.
 
 ### Immutability Patterns
 
@@ -220,18 +200,10 @@ const deepUpdate = {
 const huge = new Array(100000).fill(0)
 const copy = [...huge, 1]  // Copies 100k items
 
-// ✅ Deliberate mutation when justified (document rationale)
+// ✅ Deliberate mutation when justified
 function optimizedPush(items: Item[], item: Item): void {
   items.push(item)  // Performance-critical path
 }
-```
-
-### Array Operations
-
-```typescript
-const filtered = items.filter(item => item.active)
-const mapped = items.map(item => ({ ...item, processed: true }))
-const sorted = [...items].sort((a, b) => a.value - b.value)  // Copy before mutating sort
 ```
 
 ## Union Types vs Enums
@@ -239,14 +211,13 @@ const sorted = [...items].sort((a, b) => a.value - b.value)  // Copy before muta
 ### Prefer String Literal Unions
 
 ```typescript
-// ✅ Default choice
 type Status = 'pending' | 'active' | 'archived'
 
 function setStatus(status: Status): void { }
 setStatus('pending')
 ```
 
-### Use `enum` Only When Necessary
+### Use `enum` Sparingly
 
 Enums introduce runtime artifacts. Prefer unions unless you need:
 
@@ -254,7 +225,6 @@ Enums introduce runtime artifacts. Prefer unions unless you need:
 2. **Namespace grouping** for exported constants
 
 ```typescript
-// ✅ Acceptable enum usage
 enum HttpStatusCode {
   OK = 200,
   NotFound = 404,
@@ -266,7 +236,7 @@ function handleResponse(code: HttpStatusCode): void {
 }
 ```
 
-**Guideline**: Default to string literal unions. Use `const enum` if you need namespacing without runtime cost (with caveats for library code).
+**Guideline**: Default to string literal unions. Avoid `const enum` in libraries due to `isolatedModules` and transpiler compatibility issues.
 
 ## Error Handling
 
@@ -297,16 +267,9 @@ function parseInput(input: string): Result<ParsedData> {
     }
   }
 }
-
-const result = parseInput(input)
-if (result.success) {
-  process(result.data)
-} else {
-  handleError(result.error)
-}
 ```
 
-**Guideline**: Use `Result` when callers should explicitly handle failure. Use `throw` for unexpected conditions that indicate bugs.
+**Consistency rule**: Avoid mixing `throw` and `Result` within the same layer. Internal logic may use `throw`; external boundaries should convert to `Result`.
 
 ### Typed Error Handling
 
@@ -329,11 +292,7 @@ async function loadData(id: string): Promise<Data> {
 
 ```typescript
 // Parallel execution
-const [users, products, stats] = await Promise.all([
-  fetchUsers(),
-  fetchProducts(),
-  fetchStats()
-])
+const [users, products] = await Promise.all([fetchUsers(), fetchProducts()])
 
 // Handle partial failures
 const results = await Promise.allSettled([fetchUsers(), fetchProducts()])
@@ -346,7 +305,7 @@ results.forEach((result, index) => {
 })
 ```
 
-**Type consideration**: `Promise.all` requires all to succeed. `Promise.allSettled` types each result as fulfilled or rejected.
+**Type note**: `Promise.all<[T1, T2]>` returns tuple types. `Promise.allSettled` returns `PromiseSettledResult<T>[]`.
 
 ### Async Initialization
 
@@ -364,7 +323,7 @@ class DataLoader {
 // ❌ Async work in constructor
 class DataLoader {
   constructor(source: string) {
-    this.init(source)  // Fire-and-forget: timing issues, no type safety for completion
+    this.init(source)  // Fire-and-forget: no type safety for completion
   }
 }
 ```
@@ -397,23 +356,15 @@ interface CreateUserOptions {
 }
 
 function createUser(options: CreateUserOptions): User { }
-
-createUser({ name: 'Alice', email: 'alice@example.com' })
 ```
 
 ### Early Returns
 
 ```typescript
 function processItem(item: Item | null): Result<ProcessedItem> {
-  if (!item) {
-    return { success: false, error: new Error('No item') }
-  }
-  if (!item.isValid) {
-    return { success: false, error: new Error('Invalid item') }
-  }
-  if (!hasPermission(item)) {
-    return { success: false, error: new Error('Forbidden') }
-  }
+  if (!item) return { success: false, error: new Error('No item') }
+  if (!item.isValid) return { success: false, error: new Error('Invalid item') }
+  if (!hasPermission(item)) return { success: false, error: new Error('Forbidden') }
   return { success: true, data: transform(item) }
 }
 ```
@@ -426,7 +377,6 @@ Use `never` to ensure all union cases are handled.
 type Shape =
   | { kind: 'circle'; radius: number }
   | { kind: 'square'; size: number }
-  | { kind: 'rectangle'; width: number; height: number }
 
 function area(shape: Shape): number {
   switch (shape.kind) {
@@ -434,16 +384,12 @@ function area(shape: Shape): number {
       return Math.PI * shape.radius ** 2
     case 'square':
       return shape.size ** 2
-    case 'rectangle':
-      return shape.width * shape.height
     default:
       const _exhaustive: never = shape
       throw new Error(`Unhandled shape: ${_exhaustive}`)
   }
 }
 ```
-
-Adding a new shape variant causes a compile error at the `never` check.
 
 ## Type Utilities
 
@@ -456,7 +402,6 @@ type UserWithoutEmail = Omit<User, 'email'>
 type UserIdAndName = Pick<User, 'id' | 'name'>
 type UserKeys = keyof User
 type NonNullableValue = NonNullable<string | null>
-type ReturnValue = ReturnType<typeof fetchUser>
 ```
 
 ### Type Aliases vs Branded Types
@@ -474,7 +419,6 @@ getUser(productId)  // ✅ TypeScript allows (same runtime type)
 
 ```typescript
 type UserId = string & { readonly __brand: 'UserId' }
-type ProductId = string & { readonly __brand: 'ProductId' }
 
 // ✅ Factory function (validation/normalization boundary)
 function createUserId(id: string): UserId {
@@ -487,18 +431,13 @@ function getUser(id: UserId): User { }
 const userId = createUserId('user-123')
 getUser(userId)  // OK
 
-const rawId = 'product-456'
-getUser(rawId)  // ❌ Type error
-
 // ❌ Avoid direct casting at usage sites
-const productId = 'prod-456' as ProductId  // Defeats type safety
+const productId = 'prod-456' as UserId  // Defeats type safety
 ```
 
-**Guideline**: Type aliases for documentation. Branded types when preventing mixing is critical (IDs, units, etc.). Factory functions serve as validation and normalization boundaries.
+**Guideline**: Type aliases for documentation. Branded types when preventing mixing is critical. Factory functions serve as validation boundaries.
 
 ### Avoid Over-Engineering Types
-
-**Conditional types and mapped types**: Powerful but can obscure intent.
 
 ```typescript
 // ⚠️ Complex mapped type (hard to debug)
@@ -510,21 +449,19 @@ type DeepReadonly<T> = {
 type UserReadonly = Readonly<User>
 ```
 
-**Guideline**: Favor clarity over cleverness. Use advanced type features when they solve real problems, not for demonstration. Complex types require clear documentation.
+**Guideline**: Favor clarity over cleverness. Complex types require clear documentation.
 
 ## Null Safety
 
 ### Optional Chaining and Nullish Coalescing
 
 ```typescript
-// Optional chaining
 const city = user?.address?.city
 const firstItem = items?.[0]
 const result = callback?.(arg)
 
 // Nullish coalescing - Only null/undefined trigger default
 const timeout = config.timeout ?? 5000
-const count = userInput ?? 0
 
 // ⚠️ Avoid || for numbers/booleans
 const timeout = config.timeout || 5000  // 0 becomes 5000!
@@ -560,7 +497,6 @@ function initialize(config: Config | null): void {
 ```typescript
 const MAX_RETRIES = 3
 const TIMEOUT_MS = 500
-const CACHE_SIZE = 100
 
 if (retryCount > MAX_RETRIES) { }
 ```
@@ -570,15 +506,9 @@ if (retryCount > MAX_RETRIES) { }
 ```typescript
 // ✅ Early returns
 function validateOrder(order: Order): Result<Order> {
-  if (!order) {
-    return { success: false, error: new Error('No order') }
-  }
-  if (order.items.length === 0) {
-    return { success: false, error: new Error('Empty order') }
-  }
-  if (!order.customer) {
-    return { success: false, error: new Error('No customer') }
-  }
+  if (!order) return { success: false, error: new Error('No order') }
+  if (order.items.length === 0) return { success: false, error: new Error('Empty') }
+  if (!order.customer) return { success: false, error: new Error('No customer') }
   return { success: true, data: order }
 }
 
@@ -593,17 +523,6 @@ function validateOrder(order: Order): Result<Order> {
   }
   return { success: false, error: new Error('Invalid') }
 }
-```
-
-### Extract Common Logic
-
-```typescript
-function formatNumber(value: number, decimals: number): string {
-  return value.toFixed(decimals)
-}
-
-const price = formatNumber(19.99, 2)
-const percentage = formatNumber(0.156, 1)
 ```
 
 ## Comments and Documentation
@@ -633,9 +552,6 @@ export function processItems<T, R>(
 // ✅ Explains rationale
 // Binary search: array is pre-sorted with 10k+ items
 const index = binarySearch(items, target)
-
-// Deliberate mutation: performance requirement (60fps)
-positions.push(newPosition)
 
 // ❌ States the obvious
 // Increment counter
