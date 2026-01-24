@@ -52,25 +52,96 @@ For language-level TypeScript standards, see [coding-standards-typescript.md](co
 
 ```
 src/
-├── app/                    # App layer (composition + re-frame core)
-│   ├── routes/             # Route definitions
-│   ├── events/             # Event handlers (cross-feature orchestration)
-│   ├── effects/            # Effect implementations (analytics, logging)
-│   ├── subs/               # Cross-feature subscriptions
-│   ├── store/              # Application state (jotai atoms)
-│   └── provider.tsx        # Root providers
+├── app/                        # App layer (composition + re-frame core)
+│   ├── routes/                 # Route definitions (lazy imports + layouts)
+│   ├── events/                 # Cross-feature event handlers
+│   │   ├── types.ts            # Command types
+│   │   └── handlers/           # Event handler implementations
+│   ├── effects/                # Effect implementations
+│   │   ├── analytics.effects.ts
+│   │   └── logging.effects.ts
+│   ├── subs/                   # Cross-feature subscriptions only
+│   │   └── cross-feature.subs.ts
+│   ├── store/                  # Application state (jotai atoms)
+│   │   └── ui.atoms.ts
+│   └── provider.tsx            # Root providers (QueryClient, Router, etc)
 │
-├── features/               # Feature modules (domain-driven, isolated)
-│   ├── auth/               # ⚠️ Cross-feature domain (auth used everywhere)
-│   ├── settings/
+├── features/                   # Feature modules (domain-driven, isolated)
+│   ├── auth/                   # ⚠️ Cross-feature domain (OK to import from other features)
+│   │   ├── api/
+│   │   │   └── auth.api.ts
+│   │   ├── components/
+│   │   │   ├── login-form.tsx
+│   │   │   └── protected-route.tsx
+│   │   ├── hooks/
+│   │   │   ├── queries/
+│   │   │   ├── mutations/
+│   │   │   └── keys.ts
+│   │   ├── types/
+│   │   │   └── index.ts
+│   │   └── index.ts            # Public API (controlled exports)
+│   │
+│   ├── settings/               # Domain feature (isolated)
+│   │   ├── api/
+│   │   │   └── settings.api.ts
+│   │   ├── components/
+│   │   │   ├── account-list.tsx
+│   │   │   └── department-form.tsx
+│   │   ├── hooks/
+│   │   │   ├── queries/
+│   │   │   │   ├── use-accounts.ts
+│   │   │   │   └── use-departments.ts
+│   │   │   ├── mutations/
+│   │   │   │   ├── use-add-department.ts
+│   │   │   │   └── use-delete-account.ts
+│   │   │   └── keys.ts
+│   │   ├── types/
+│   │   │   └── index.ts
+│   │   └── index.ts
+│   │
 │   └── dashboard/
+│       └── ...
 │
-├── components/             # Shared UI components
-├── lib/                    # Shared utilities (query-client, http, errors, hooks)
-└── types/                  # Shared types
+├── components/                 # Shared UI components
+│   ├── ui/                     # Primitives (Button, Card, Input, etc)
+│   │   ├── button.tsx
+│   │   ├── card.tsx
+│   │   └── input.tsx
+│   ├── layout/                 # Layout components (Header, Sidebar, Footer)
+│   │   ├── header.tsx
+│   │   ├── sidebar.tsx
+│   │   └── footer.tsx
+│   └── feedback/               # Feedback components (Spinner, ErrorView, etc)
+│       ├── spinner.tsx
+│       └── error-view.tsx
+│
+├── lib/                        # Shared utilities
+│   ├── query-client.ts         # TanStack Query setup + meta augmentation
+│   ├── http.ts                 # httpJson, httpText
+│   ├── errors.ts               # ApiError class
+│   └── hooks/                  # Shared hooks
+│       ├── use-toggle.ts
+│       └── use-debounce.ts
+│
+└── types/                      # Shared types
+    ├── api.ts                  # Common API types
+    └── common.ts               # Common utility types
 ```
 
-**Cross-feature exceptions**: Auth, pricing, plan, or other cross-cutting concerns can live in `features/` but are imported by other features as shared dependencies. Alternative: Create `src/domains/` for truly cross-cutting logic (features can import, but domains cannot import features/app).
+### Placement Rules
+
+**features/[domain]/**:
+- `api/`: API client functions (use `httpJson`/`httpText`)
+- `components/`: Feature-specific components
+- `hooks/queries/`: TanStack Query hooks (read operations)
+- `hooks/mutations/`: TanStack Query mutations (write operations)
+- `hooks/keys.ts`: QueryKey factory
+- `types/`: Feature-specific types
+- `index.ts`: Public API (export only what's needed by other layers)
+
+**Cross-feature exceptions**: `features/auth/`, `features/pricing/`, `features/plan/` can be imported by other features. Alternative: Create `src/domains/` for cross-cutting logic (features can import, but domains cannot import features/app).
+
+**File count guideline**: If a feature has >10 components, consider splitting into subdomains (e.g., `features/settings/accounts/`, `features/settings/departments/`).
 
 ---
 
@@ -805,6 +876,12 @@ test('deletes account on click', async () => {
 - **ESLint + Prettier + TypeScript + Husky**: Code quality, formatting, type safety, pre-commit hooks
 - **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/components/ui/card'`)
 - **File Naming**: kebab-case (`account-list.tsx`), enforce with ESLint `check-file` plugin
+- **File Size**: Target 100-200 lines, max 400 lines per `.ts`/`.tsx` file for readability
+  - **If exceeding 400 lines**:
+    - Components: Split into Container/Presenter or extract sub-components
+    - Hooks: Split queries/mutations into separate files
+    - API clients: Split by resource (e.g., `accounts.api.ts`, `departments.api.ts`)
+    - Utils: Split by responsibility (e.g., `date.utils.ts`, `string.utils.ts`)
 
 ---
 
