@@ -10,11 +10,17 @@ Language-level standards for Python 3.11+. Backend patterns in backend-patterns-
 ## Naming Conventions
 
 ```python
+from typing import TypedDict
+
 # Variables and functions: snake_case
 user_count = 42
 is_authenticated = True
 
-def calculate_total(items: list[dict]) -> float:
+class LineItem(TypedDict):
+    price: float
+    quantity: int
+
+def calculate_total(items: list[LineItem]) -> float:
     pass
 
 # Classes: PascalCase
@@ -74,11 +80,11 @@ class UserPayload(TypedDict):
     name: str
     email: str
 
-def parse_response(data: dict) -> UserPayload:
+def parse_response(data: dict[str, object]) -> UserPayload:
     payload: UserPayload = {
-        "id": data["id"],
-        "name": data["name"],
-        "email": data["email"],
+        "id": str(data["id"]),
+        "name": str(data["name"]),
+        "email": str(data["email"]),
     }
     return payload
 ```
@@ -142,6 +148,10 @@ class ApplicationError(Exception):
 
 class ValidationError(ApplicationError):
     """Validation failure."""
+    pass
+
+class MaxRetriesExceeded(ApplicationError):
+    """Maximum retry attempts exceeded."""
     pass
 ```
 
@@ -215,6 +225,11 @@ def parse_config(data: str) -> Success[dict[str, object]] | Failure[str]:
     except json.JSONDecodeError as e:
         return Failure(f"Invalid JSON: {e}")
 
+def use_config(config: dict[str, object]) -> None:
+    """Process validated configuration."""
+    pass
+
+config_string = '{"key": "value"}'
 result = parse_config(config_string)
 match result:
     case Success(value):
@@ -328,8 +343,8 @@ def calculate_total(items: list[LineItem]) -> float:
 
 def validate_email(email: str) -> bool:
     """Basic email validation. Not RFC-compliant."""
-    parts = email.split("@")
-    return len(parts) == 2 and "." in parts[1]
+    local, sep, domain = email.partition("@")
+    return bool(local and sep and domain and "." in domain)
 ```
 
 ### Keyword-Only Arguments
@@ -389,6 +404,8 @@ delay = min(30, 2**retry_count)
 ## Code Quality
 
 ```python
+from typing import TypedDict
+
 # Avoid magic numbers
 MAX_RETRIES = 3
 TIMEOUT_SECONDS = 30
@@ -397,12 +414,23 @@ if retry_count > MAX_RETRIES:
     raise MaxRetriesExceeded()
 
 # Avoid deep nesting - use early returns
+class ProcessData(TypedDict):
+    is_valid: bool
+
+def has_permission(data: ProcessData) -> bool:
+    """Check if data has required permissions."""
+    return True
+
+def transform(data: ProcessData) -> dict[str, object]:
+    """Transform validated data."""
+    return {"status": "ok"}
+
 def process_data(
-    data: dict[str, object] | None,
+    data: ProcessData | None,
 ) -> Success[dict[str, object]] | Failure[str]:
     if data is None:
         return Failure("No data")
-    if not data.get("is_valid"):
+    if data.get("is_valid") is not True:
         return Failure("Invalid")
     if not has_permission(data):
         return Failure("Forbidden")
