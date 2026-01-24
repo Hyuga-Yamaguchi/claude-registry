@@ -5,46 +5,27 @@ description: Python language-level coding standards and best practices for Pytho
 
 # Python Coding Standards
 
-Language-level standards for Python 3.11+. Project-specific backend patterns in backend-patterns-fastapi.md. Formatting handled by Ruff formatter.
+Language-level standards for Python 3.11+. Formatting handled by Ruff formatter.
 
 ## Naming Conventions
 
-### Variables and Functions
-
-Use `snake_case` for variables and functions.
-
 ```python
+# Variables and functions: snake_case
 user_count = 42
 is_authenticated = True
 
 def calculate_total(items: list[dict]) -> float:
     pass
-```
 
-### Classes
-
-Use `PascalCase` for class names.
-
-```python
+# Classes: PascalCase
 class UserRepository:
     pass
-```
 
-### Constants
-
-Use `UPPER_SNAKE_CASE` for module-level constants.
-
-```python
+# Constants: UPPER_SNAKE_CASE
 MAX_RETRIES = 3
-DEFAULT_TIMEOUT = 30
 API_BASE_URL = "https://api.example.com"
-```
 
-### Private Members
-
-Use single underscore prefix for internal use.
-
-```python
+# Private members: _prefix
 class User:
     def __init__(self, name: str):
         self._name = name
@@ -83,7 +64,7 @@ def get_user(user_id: str) -> User | None:
 
 Use TypedDict or dataclasses instead of generic `dict`.
 
-**TypedDict**: For static type checking of dictionary structures. Not a runtime validator.
+**TypedDict**: For static type checking. Not a runtime validator.
 
 ```python
 from typing import TypedDict
@@ -112,14 +93,11 @@ class User:
     id: str
     name: str
     email: str
-
-def create_user(payload: UserPayload) -> User:
-    return User(**payload)
 ```
 
 ### When to Use `Any`
 
-Use `Any` only at system boundaries (external APIs, legacy code). Document the reason.
+Use `Any` only at system boundaries. Document the reason.
 
 ```python
 from typing import Any
@@ -198,11 +176,12 @@ def parse_config(config_str: str) -> dict:
 
 ### Result Pattern
 
-For expected domain errors, use Result pattern for explicit error handling.
+For expected domain errors, use Success/Failure pattern. Return type is always `Success[T] | Failure[E]`.
 
 ```python
+import json
 from dataclasses import dataclass
-from typing import Generic, TypeAlias, TypeVar
+from typing import Generic, TypeVar
 
 T = TypeVar("T")
 E = TypeVar("E")
@@ -215,23 +194,19 @@ class Success(Generic[T]):
 class Failure(Generic[E]):
     error: E
 
-Result: TypeAlias = Success[T] | Failure[E]
-
-def parse_input(data: str) -> Success[dict] | Failure[str]:
-    import json
-
+def parse_config(data: str) -> Success[dict[str, object]] | Failure[str]:
     try:
         parsed = json.loads(data)
         return Success(parsed)
-    except json.JSONDecodeError:
-        return Failure("Invalid JSON")
+    except json.JSONDecodeError as e:
+        return Failure(f"Invalid JSON: {e}")
 
-result = parse_input(input_string)
+result = parse_config(config_string)
 match result:
     case Success(value):
-        process(value)
+        use_config(value)
     case Failure(error):
-        handle_error(error)
+        logger.error("Config parse failed: %s", error)
 ```
 
 ## Data Structures
@@ -248,9 +223,16 @@ class Money:
     currency: str
 
 @dataclass(frozen=True)
+class OrderItem:
+    product_id: str
+    quantity: int
+    price: Decimal
+
+@dataclass(frozen=True)
 class Order:
     id: str
     user_id: str
+    items: list[OrderItem]
     total: Money
 ```
 
@@ -294,33 +276,22 @@ class Counter:
 
 ## Pythonic Idioms
 
-### Comprehensions
-
-```python
-squares = [x**2 for x in range(10)]
-even_squares = [x**2 for x in range(10) if x % 2 == 0]
-user_map = {user.id: user.name for user in users}
-```
-
-### Generators for Large Data
-
 ```python
 from typing import Iterator
 
+# Comprehensions
+squares = [x**2 for x in range(10)]
+user_map = {user.id: user.name for user in users}
+
+# Generators for large data
 def read_large_file(path: str) -> Iterator[str]:
     with open(path) as f:
         for line in f:
             yield line.strip()
-```
 
-### Built-in Functions
-
-```python
+# Built-in functions
 for index, item in enumerate(items):
     print(f"{index}: {item}")
-
-for name, age in zip(names, ages):
-    print(f"{name} is {age}")
 
 name = user.get("name", "Anonymous")
 has_admin = any(user.role == "admin" for user in users)
@@ -332,11 +303,13 @@ all_active = all(user.active for user in users)
 ### Single Responsibility
 
 ```python
-def calculate_total(items: list[dict]) -> float:
+def calculate_total(items: list[dict[str, float]]) -> float:
     return sum(item["price"] * item["quantity"] for item in items)
 
 def validate_email(email: str) -> bool:
-    return "@" in email and "." in email.split("@")[1]
+    """Basic email validation. Not RFC-compliant."""
+    parts = email.split("@")
+    return len(parts) == 2 and "." in parts[1]
 ```
 
 ### Keyword-Only Arguments
@@ -369,10 +342,8 @@ def process_order(order: Order | None) -> Success[Order] | Failure[str]:
 
 ### Docstrings for Public APIs
 
-All public functions must have docstrings.
-
 ```python
-def search_items(query: str, limit: int = 10) -> list[dict]:
+def search_items(query: str, limit: int = 10) -> list[dict[str, object]]:
     """Search items using semantic similarity.
 
     Args:
@@ -397,19 +368,15 @@ delay = min(30, 2**retry_count)
 
 ## Code Quality
 
-### Avoid Magic Numbers
-
 ```python
+# Avoid magic numbers
 MAX_RETRIES = 3
 TIMEOUT_SECONDS = 30
 
 if retry_count > MAX_RETRIES:
     raise MaxRetriesExceeded()
-```
 
-### Avoid Deep Nesting
-
-```python
+# Avoid deep nesting - use early returns
 def process_data(data: dict | None) -> Success[dict] | Failure[str]:
     if data is None:
         return Failure("No data")
@@ -485,19 +452,20 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Never
-logger.info(f"User: {user.email}")
-logger.debug(f"API key: {api_key}")
+# Never log PII or secrets
+logger.info(f"User: {user.email}")  # Wrong
+logger.debug(f"API key: {api_key}")  # Wrong
 
 # Log events without sensitive data
 logger.info("User logged in", extra={"user_id": user.id})
 ```
 
-### Prefer Structured Logging
+### Prefer Structured Logging and Lazy Formatting
 
-Use `extra` for structured data.
+Use `extra` for structured data. Use lazy formatting (%) for performance.
 
 ```python
+# Structured logging (preferred)
 logger.info(
     "Order created",
     extra={
@@ -506,6 +474,12 @@ logger.info(
         "total": str(order.total),
     },
 )
+
+# Lazy formatting (recommended for simple cases)
+logger.info("Order %s created for user %s", order.id, order.user_id)
+
+# f-strings work but are eagerly evaluated (not recommended)
+logger.info(f"Order {order.id} created")
 ```
 
 ### Use logger.exception() for Unexpected Errors
@@ -542,12 +516,6 @@ import psycopg
 def get_user(user_id: str, conn: psycopg.Connection) -> tuple | None:
     cursor = conn.execute("SELECT * FROM users WHERE id = %s", (user_id,))
     return cursor.fetchone()
-```
-
-**Never**:
-
-```python
-query = f"SELECT * FROM users WHERE id = '{user_id}'"
 ```
 
 ### Never Use shell=True
@@ -615,6 +583,8 @@ def test_registration_sends_email(mock_send):
 ### No Network in Unit Tests
 
 ```python
+import pytest
+
 @pytest.mark.integration
 def test_api_call():
     response = api_client.fetch_user("123")
