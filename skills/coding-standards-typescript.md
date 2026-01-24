@@ -149,8 +149,8 @@ interface User {
   metadata: Record<string, unknown> | undefined  // Must be present, can be undefined
 }
 
-const user1: User = { id: '1' }  // OK - email omitted
-const user2: User = { id: '2', metadata: undefined }  // OK - metadata explicit
+const user1: User = { id: '1', metadata: undefined }  // OK - email omitted, metadata explicit
+const user2: User = { id: '2', metadata: { key: 'value' } }  // OK - metadata provided
 ```
 
 **Key insight**: `?` signals "may be absent". `| undefined` signals "undefined is a meaningful value".
@@ -159,7 +159,7 @@ const user2: User = { id: '2', metadata: undefined }  // OK - metadata explicit
 
 ### Use `import type` for Type-Only Imports
 
-Avoids emitting runtime code for type imports. Reduces accidental coupling and helps prevent circular dependency issues at runtime.
+Avoids emitting runtime code for type imports. Reduces accidental coupling and helps avoid circular import pitfalls.
 
 ```typescript
 // ✅ Type-only import
