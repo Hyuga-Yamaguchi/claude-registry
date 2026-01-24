@@ -1,626 +1,583 @@
 ---
 name: frontend-patterns-react
-description: Reagent-inspired React/Next.js patterns - subscription-driven UI, event/effect separation, side-effects at the edges, with TanStack Query as standard.
+description: Reagent-inspired React SPA patterns with bulletproof-react structure - subscription-driven UI, event/effect separation, side-effects at the edges, with TanStack Query as standard.
 ---
 
-# React Frontend Patterns (Reagent-inspired)
+# React Frontend Patterns (Reagent-inspired + Bulletproof Structure)
 
-Design guide applying Reagent/Re-frame philosophy (subscription model, event-driven, side-effect separation) to React/Next.js.
+Design guide applying Reagent/Re-frame philosophy (subscription model, event-driven, effect isolation) to React SPA (react-router-dom), using [bulletproof-react](https://github.com/alan2207/bulletproof-react) as the structural foundation.
 
 For language-level TypeScript standards, see [coding-standards-typescript.md](coding-standards-typescript.md).
 
 ---
 
-## Non-negotiable Principles
+## Philosophy: Bulletproof + Re-frame Layer
 
-### 1. Pure View (Subscribe and Render Only)
+**bulletproof-react** provides structural foundation (directory structure, boundaries), while **Reagent/Re-frame** enforces behavioral rules (pure views, event-driven, effect isolation).
 
-**UI subscribes to state and renders. Nothing more.**
+**What bulletproof-react provides:**
+- Features-based organization (domain boundaries)
+- Unidirectional codebase (shared → features → app)
+- State classification (Component / Application / Server Cache / Form / URL)
 
-- Page/Component follows: "read state → render"
-- No side effects (API calls, toasts, navigation, logging) scattered in UI
-- **`useEffect` for "watch state → trigger side effect" is prohibited**
+**What we add (Re-frame layer):**
+- Pure View: Subscribe & Render only
+- Event-driven: Changes through events
+- Effect isolation: Side effects at boundaries
+- Subscriptions: Derived data via selectors
+
+---
+
+## Tech Stack
+
+### Core
+- **[React](https://react.dev)** (18+), **[TypeScript](https://www.typescriptlang.org/)** (required), **[react-router-dom](https://reactrouter.com/)**
+
+### State
+- **[TanStack Query](https://tanstack.com/query)** (v5): Server state (required)
+- **[jotai](https://jotai.org/)**: Application state (minimal UI-only)
+
+### Forms & UI
+- **[react-hook-form](https://react-hook-form.com/)** + **[zod](https://github.com/colinhacks/zod)**: Forms/validation
+- **[Tailwind CSS](https://tailwindcss.com/)**: Styling
+- **[sonner](https://sonner.emilkowal.ski/)**: Toast notifications
+- **[DOMPurify](https://github.com/cure53/DOMPurify)**: XSS sanitization (when rendering user HTML)
+
+### Testing
+- **[Vitest](https://vitest.dev)**, **[Testing Library](https://testing-library.com/)**, **[Playwright](https://playwright.dev)**, **[MSW](https://mswjs.io)**
+
+---
+
+## Directory Structure
+
+```
+src/
+├── app/                        # App layer (composition + re-frame core)
+│   ├── routes/                 # Route definitions (lazy imports + layouts)
+│   ├── events/                 # Cross-feature event handlers
+│   │   ├── types.ts            # Command types
+│   │   └── handlers/           # Event handler implementations
+│   ├── effects/                # Effect implementations
+│   │   ├── analytics.effects.ts
+│   │   └── logging.effects.ts
+│   ├── subs/                   # Cross-feature subscriptions only
+│   │   └── cross-feature.subs.ts
+│   ├── store/                  # Application state (jotai atoms)
+│   │   └── ui.atoms.ts
+│   └── provider.tsx            # Root providers (QueryClient, Router, etc)
+│
+├── features/                   # Feature modules (domain-driven, isolated)
+│   ├── auth/                   # ⚠️ Cross-feature domain (OK to import from other features)
+│   │   ├── api/
+│   │   │   └── auth.api.ts
+│   │   ├── components/
+│   │   │   ├── login-form.tsx
+│   │   │   └── protected-route.tsx
+│   │   ├── hooks/
+│   │   │   ├── queries/
+│   │   │   ├── mutations/
+│   │   │   └── keys.ts
+│   │   ├── types/
+│   │   │   └── index.ts
+│   │   └── index.ts            # Public API (controlled exports)
+│   │
+│   ├── settings/               # Domain feature (isolated)
+│   │   ├── api/
+│   │   │   └── settings.api.ts
+│   │   ├── components/
+│   │   │   ├── account-list.tsx
+│   │   │   └── department-form.tsx
+│   │   ├── hooks/
+│   │   │   ├── queries/
+│   │   │   │   ├── use-accounts.ts
+│   │   │   │   └── use-departments.ts
+│   │   │   ├── mutations/
+│   │   │   │   ├── use-add-department.ts
+│   │   │   │   └── use-delete-account.ts
+│   │   │   └── keys.ts
+│   │   ├── types/
+│   │   │   └── index.ts
+│   │   └── index.ts
+│   │
+│   └── dashboard/
+│       └── ...
+│
+├── components/                 # Shared UI components
+│   ├── ui/                     # Primitives (Button, Card, Input, etc)
+│   │   ├── button.tsx
+│   │   ├── card.tsx
+│   │   └── input.tsx
+│   ├── layout/                 # Layout components (Header, Sidebar, Footer)
+│   │   ├── header.tsx
+│   │   ├── sidebar.tsx
+│   │   └── footer.tsx
+│   └── feedback/               # Feedback components (Spinner, ErrorView, etc)
+│       ├── spinner.tsx
+│       └── error-view.tsx
+│
+├── lib/                        # Shared utilities
+│   ├── query-client.ts         # TanStack Query setup + meta augmentation
+│   ├── http.ts                 # httpJson, httpText
+│   ├── errors.ts               # ApiError class
+│   └── hooks/                  # Shared hooks
+│       ├── use-toggle.ts
+│       └── use-debounce.ts
+│
+└── types/                      # Shared types
+    ├── api.ts                  # Common API types
+    └── common.ts               # Common utility types
+```
+
+### Placement Rules
+
+**features/[domain]/**:
+- `api/`: API client functions (use `httpJson`/`httpText`)
+- `components/`: Feature-specific components
+- `hooks/queries/`: TanStack Query hooks (read operations)
+- `hooks/mutations/`: TanStack Query mutations (write operations)
+- `hooks/keys.ts`: QueryKey factory
+- `types/`: Feature-specific types
+- `index.ts`: Public API (export only what's needed by other layers)
+
+**Cross-feature exceptions**: `features/auth/`, `features/pricing/`, `features/plan/` can be imported by other features. Alternative: Create `src/domains/` for cross-cutting logic (features can import, but domains cannot import features/app).
+
+**File count guideline**: If a feature has >10 components, consider splitting into subdomains (e.g., `features/settings/accounts/`, `features/settings/departments/`).
+
+---
+
+## Principles
+
+### 1. Pure View (Subscribe & Render)
+
+**Container components** subscribe to state (useQuery/useMutation) and wire event handlers. **Presenter components** receive props and render (no subscriptions, no side effects).
+
+**Prohibited**: `useEffect` for "watch state → trigger side effect" (e.g., `useEffect(() => { if (isError) toast() }, [isError])`).
+
+**Allowed useEffect**: DOM manipulation (charts, third-party widgets), focus control, Observers (Intersection/Resize), window listeners (scroll/resize).
 
 ```typescript
-// ❌ BAD: useEffect watching state to trigger side effects
-function Page() {
-  const { data, isError } = useQuery(...)
+// ❌ BAD: State monitoring triggers side effect
+useEffect(() => { if (isError) toast.error('Failed') }, [isError])
 
-  useEffect(() => {
-    if (isError) {
-      toast.error('Failed to load data')  // Side effect in UI layer
-    }
-  }, [isError])
-
-  return <div>{data?.name}</div>
-}
-
-// ✅ GOOD: Subscribe and render only
+// ✅ GOOD: Subscribe and render, side effects in mutation/query hooks
 function Page() {
   const { data, isLoading, isError } = useAccounts()
-
   if (isLoading) return <Spinner />
-  if (isError) return <ErrorView />  // Display branching only, no side effects
-
-  return <div>{data.map(account => <AccountCard key={account.id} account={account} />)}</div>
+  if (isError) return <ErrorView />
+  return <AccountList accounts={data} />
 }
 ```
 
 ### 2. Event-driven (Change Through Events)
 
-**User actions and updates are expressed as events (handlers / mutations).**
+User actions = events. **"Events" = feature mutations/handlers** (entry points for user operations). Side effects in mutation callbacks (`onSuccess`/`onError`).
 
-- Side effects confined to event side (mutation / handler) or boundaries (API layer / QueryClient / interceptor)
-- "Event happens → state changes" not "state changes → do something"
+**Use `app/events`** only for cross-feature orchestration (multiple features, analytics/logging, complex error handling, router decoupling). Don't move all logic to `app/events`—default to feature hooks.
+
+### 3. Effects at Edges (Side Effects at Boundaries)
+
+Side effects aggregated at: API layer (ApiError normalization), QueryClient (opt-in error toast), mutation callbacks (success toast, navigation, invalidation).
+
+### 4. Single Source of Truth (TanStack Query)
+
+Server state via TanStack Query (required). No `useState + useEffect` for fetching. Use queryKey factories. Reactive updates via `invalidateQueries`.
+
+### 5. Unidirectional Codebase (shared → features → app)
+
+`lib/`, `components/`, `types/` are shared (no feature/app dependencies). `features/` use shared code, cannot import other features (except cross-cutting domains like auth). `app/` composes features.
 
 ```typescript
-// ❌ BAD: useEffect watching state to do something
-useEffect(() => {
-  if (isSuccess) {
-    toast.success('Created!')
-    navigate('/list')
-  }
-}, [isSuccess])
+// ✅ GOOD
+import { Card } from '@/components/ui/card'
+import { useUser } from '@/features/auth'  // Cross-cutting domain OK
 
-// ✅ GOOD: Side effects in mutation's onSuccess
-const { mutate: addDepartment } = useAddDepartment({
-  onSuccess: () => {
-    // Define side effects in mutation
-    queryClient.invalidateQueries({ queryKey: settingsKeys.departments() })
-    toast.success('Department added')
-    navigate('/settings/departments')
-  }
-})
+// ❌ BAD
+import { useDashboard } from '@/features/dashboard'  // From another feature (PROHIBITED)
 ```
-
-### 3. Effects at the Edges (Side Effects at Boundaries)
-
-**Side effects are aggregated at boundaries (API layer, QueryClient, interceptor).**
-
-- API errors normalized in API layer (`ApiError` etc), not interpreted in UI layer
-- Toast displayed at **global layer** (QueryClient's `QueryCache/MutationCache` or HTTP interceptor)
-- ErrorBoundary is for "render-time exceptions". Don't rely on it for request error toasts
-
-### 4. Single Source of Truth (TanStack Query as Standard)
-
-**Server state managed with `@tanstack/react-query` (required).**
-
-- `useState + useEffect` for fetching is prohibited
-- Custom `useQuery` / `DataLoader` should be removed
-- Use queryKey factory to avoid hardcoded strings
-- Reactive updates via `invalidateQueries` (Reagent-style)
-
-### 5. Allowed `useEffect` Use Cases
-
-**`useEffect` allowed only for UI-local concerns (DOM manipulation, measurement, focus).**
-
-Allowed:
-- Direct DOM manipulation (chart library, third-party widget)
-- Focus control (Modal focus trap)
-- IntersectionObserver, ResizeObserver
-- Window event listeners (scroll, resize)
-
-Prohibited:
-- Data fetching (use TanStack Query)
-- Watch state to toast/navigate/log (use mutation's onSuccess/onError)
 
 ---
 
-## Server State: TanStack Query (Standard)
+## Toast Responsibility (Unified Strategy)
 
-### QueryKey Factory Pattern
+**Approach**: Practical balance between Re-frame purity and real-world ergonomics.
 
-**Manage queryKey with factory functions to avoid hardcoded strings.**
+**Error Toast (Mutations Only)**:
+- Mutations: Opt-in via `meta: { toastError: true }` (MutationCache handles)
+- Queries: NO toast (background refetch would spam). Use UI error display (`isError` → `<ErrorView />`).
+
+**Success Toast**:
+- Call `toast.success()` directly in mutation `onSuccess` (NOT in page components).
+
+**Navigation**:
+- Command pattern: mutations return commands, UI interprets (avoids router coupling in features).
+
+**Rationale**: Mutations are explicit user actions (toast appropriate). Queries run in background (toast inappropriate). Success feedback is mutation-specific, so `onSuccess` is the right place.
 
 ```typescript
-// ✅ GOOD: queryKey factory
-export const settingsKeys = {
-  all: ['settings'] as const,
-  accounts: () => [...settingsKeys.all, 'accounts'] as const,
-  accountDetail: (id: string) => [...settingsKeys.accounts(), id] as const,
-  departments: () => [...settingsKeys.all, 'departments'] as const,
-  departmentDetail: (id: string) => [...settingsKeys.departments(), id] as const,
+// lib/query-client.ts (TypeScript meta augmentation)
+import { QueryClient, MutationCache } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { ApiError } from './errors'
+
+declare module '@tanstack/react-query' {
+  interface Register {
+    defaultError: ApiError
+    queryMeta: {
+      toastError?: boolean  // Queries: avoid (background refetch spam)
+    }
+    mutationMeta: {
+      toastError?: boolean  // Mutations: opt-in for error toast
+    }
+  }
 }
 
-// ❌ BAD: Hardcoded strings
-useQuery({ queryKey: ['settings', 'accounts'], ... })
-useQuery({ queryKey: ['accounts'], ... })  // Prone to inconsistency
+export const queryClient = new QueryClient({
+  mutationCache: new MutationCache({
+    onError: (error, _vars, _ctx, mutation) => {
+      if (mutation.meta?.toastError) {
+        if (error instanceof ApiError) {
+          // Don't toast auth errors (handled by UI) or validation errors (handled by forms)
+          if (error.status === 401 || error.status === 403 || error.status === 422) return
+          toast.error(error.message)
+        } else {
+          // Non-ApiError: log and show generic message
+          console.error('Unexpected mutation error:', error)
+          toast.error('An unexpected error occurred')
+        }
+      }
+    },
+  }),
+  defaultOptions: {
+    queries: { staleTime: 60000, retry: 1 },
+  },
+})
+
+// features/settings/hooks/mutations/use-add-department.ts (EXAMPLE)
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { settingsApi } from '../../api/settings.api'
+import { settingsKeys } from '../keys'
+import type { Department } from '../../types'
+import type { Command } from '@/app/events/types'
+
+export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void }) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: settingsApi.addDepartment,
+    meta: { toastError: true },  // Error toast opt-in
+    onSuccess: (data: Department) => {
+      queryClient.invalidateQueries({ queryKey: settingsKeys.departments() })
+      toast.success('Department added')  // Success toast here
+      options?.onCommand?.({ type: 'NAVIGATE', to: `/settings/departments/${data.id}` })
+    },
+  })
+}
 ```
 
-### API Layer: ApiError and http wrapper
+---
 
-**Define unified error type in API layer and wrap fetch.**
+## API Layer & HTTP Wrapper
+
+### ApiError
 
 ```typescript
-// api/errors.ts
+// lib/errors.ts
 export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public code?: string
+    public code?: string,
+    public details?: unknown
   ) {
     super(message)
     this.name = 'ApiError'
   }
 }
+```
 
-// api/http.ts
-export async function http<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  })
+### HTTP Wrapper (Type-safe + FormData support)
+
+**httpJson Contract**: Endpoints using `httpJson` MUST return `Content-Type: application/json` (except 204 No Content). Contract violations throw `ApiError` with `INVALID_CONTENT_TYPE` for early detection. For non-JSON responses, use `httpText()` or raw `fetch()`.
+
+**Usage**: `httpJson` is for JSON request/response only. For FormData/Blob/URLSearchParams, use `fetch()` directly (FormData sets its own Content-Type with boundary).
+
+```typescript
+// lib/http.ts
+import { ApiError } from './errors'
+
+export async function httpJson<T>(
+  url: string,
+  options?: RequestInit & { signal?: AbortSignal }
+): Promise<T> {
+  const headers = new Headers(options?.headers)
+
+  // Only set Content-Type for JSON if body exists and not FormData
+  if (options?.body && !(options.body instanceof FormData)) {
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json')
+    }
+  }
+
+  const res = await fetch(url, { ...options, headers })
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}))
+    let errorData: any = {}
+    const contentType = res.headers.get('content-type')
+    if (contentType?.includes('application/json')) {
+      errorData = await res.json().catch(() => ({}))
+    }
     throw new ApiError(
       errorData.message || `HTTP ${res.status}`,
       res.status,
-      errorData.code
+      errorData.code,
+      errorData.details
+    )
+  }
+
+  if (res.status === 204) return undefined as T
+
+  // Validate Content-Type for successful responses (contract enforcement)
+  const contentType = res.headers.get('content-type')
+  if (!contentType?.includes('application/json')) {
+    throw new ApiError(
+      'Expected JSON response',
+      res.status,
+      'INVALID_CONTENT_TYPE',
+      { contentType }
     )
   }
 
   return res.json()
 }
 
-// api/settings.ts
+export async function httpText(url: string, options?: RequestInit): Promise<string> {
+  const res = await fetch(url, options)
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '')
+    throw new ApiError(
+      `HTTP ${res.status}`,
+      res.status,
+      undefined,
+      { bodyText: bodyText.slice(0, 500) }  // Limit to 500 chars to avoid large logs
+    )
+  }
+  return res.text()
+}
+```
+
+### API Client Example
+
+```typescript
+// features/settings/api/settings.api.ts (EXAMPLE)
+import { httpJson } from '@/lib/http'
+import type { Account, Department, CreateDepartmentInput } from '../types'
+
 export const settingsApi = {
-  getAccounts: () => http<Account[]>('/api/settings/accounts'),
-  getDepartments: () => http<Department[]>('/api/settings/departments'),
+  getAccounts: (signal?: AbortSignal) =>
+    httpJson<Account[]>('/api/settings/accounts', { signal }),
+
   addDepartment: (data: CreateDepartmentInput) =>
-    http<Department>('/api/settings/departments', {
+    httpJson<Department>('/api/settings/departments', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  deleteAccount: (id: string) =>
+    httpJson<void>(`/api/settings/accounts/${id}`, { method: 'DELETE' }),
 }
 ```
 
-### QueryClient: Global Toast (Errors Only)
+---
 
-**Define onError in QueryCache/MutationCache. Don't call toast in pages.**
+## Server State: TanStack Query
 
-```typescript
-// lib/query-client.ts
-import { QueryClient, QueryCache, MutationCache } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { ApiError } from '@/api/errors'
-
-export const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError: (error) => {
-      if (error instanceof ApiError) {
-        toast.error(`Error: ${error.message}`)
-      } else {
-        toast.error('An unexpected error occurred')
-      }
-    },
-  }),
-  mutationCache: new MutationCache({
-    onError: (error) => {
-      if (error instanceof ApiError) {
-        toast.error(`Operation failed: ${error.message}`)
-      } else {
-        toast.error('An unexpected error occurred')
-      }
-    },
-  }),
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60,  // 1 minute
-      retry: 1,
-    },
-  },
-})
-```
-
-**Don't call toast in pages. Only display branching (error views).**
+### QueryKey Factory
 
 ```typescript
-// ❌ BAD: Calling toast in page
-function Page() {
-  const { data, isError, error } = useAccounts()
-
-  useEffect(() => {
-    if (isError) {
-      toast.error(error.message)  // Already displayed at global layer
-    }
-  }, [isError, error])
-
-  return <div>...</div>
-}
-
-// ✅ GOOD: Display branching only
-function Page() {
-  const { data, isLoading, isError } = useAccounts()
-
-  if (isLoading) return <Spinner />
-  if (isError) return <ErrorView message="Failed to load accounts" />
-
-  return <AccountList accounts={data} />
+// features/settings/hooks/keys.ts (EXAMPLE)
+export const settingsKeys = {
+  all: ['settings'] as const,
+  accounts: () => [...settingsKeys.all, 'accounts'] as const,
+  accountDetail: (id: string) => [...settingsKeys.accounts(), id] as const,
+  departments: () => [...settingsKeys.all, 'departments'] as const,
 }
 ```
 
-### Feature Query Hooks
-
-**Place `useXxxQuery` / `useXxxMutation` in feature layer.**
+### Query Hook (No Toast)
 
 ```typescript
-// features/settings/queries/use-accounts.ts
+// features/settings/hooks/queries/use-accounts.ts (EXAMPLE)
 import { useQuery } from '@tanstack/react-query'
-import { settingsApi } from '@/api/settings'
-import { settingsKeys } from './keys'
+import { settingsApi } from '../../api/settings.api'
+import { settingsKeys } from '../keys'
 
 export function useAccounts() {
   return useQuery({
     queryKey: settingsKeys.accounts(),
-    queryFn: settingsApi.getAccounts,
+    queryFn: ({ signal }) => settingsApi.getAccounts(signal),
+    // ⚠️ No meta.toastError for queries (background refetch would spam)
   })
 }
+```
 
-// features/settings/queries/use-departments.ts
-export function useDepartments() {
-  return useQuery({
-    queryKey: settingsKeys.departments(),
-    queryFn: settingsApi.getDepartments,
-  })
-}
+### Derived Data (select)
 
-// features/settings/mutations/use-add-department.ts
+```typescript
+const { data: activeAccounts } = useQuery({
+  queryKey: settingsKeys.accounts(),
+  queryFn: ({ signal }) => settingsApi.getAccounts(signal),
+  select: (accounts) => accounts.filter(a => a.status === 'active'),
+})
+```
+
+### Cache Update Strategy
+
+**Default**: Use `invalidateQueries` (refetch from server).
+
+**Optimistic UX**: Use `setQueryData` for immediate feedback (e.g., list operations where stale data is acceptable).
+
+```typescript
+// features/settings/hooks/mutations/use-delete-account.ts (EXAMPLE)
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { settingsApi } from '@/api/settings'
-import { settingsKeys } from '../queries/keys'
+import { settingsApi } from '../../api/settings.api'
+import { settingsKeys } from '../keys'
+import type { Account } from '../../types'
 
-export function useAddDepartment() {
+export function useDeleteAccount() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: settingsApi.addDepartment,
-    onSuccess: () => {
-      // Reagent-style reactive update via invalidateQueries
-      queryClient.invalidateQueries({ queryKey: settingsKeys.departments() })
+    mutationFn: settingsApi.deleteAccount,
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: settingsKeys.accounts() })
+      const previous = queryClient.getQueryData<Account[]>(settingsKeys.accounts())
+      queryClient.setQueryData<Account[]>(settingsKeys.accounts(), (old = []) =>
+        old.filter(a => a.id !== id)
+      )
+      return { previous }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(settingsKeys.accounts(), context.previous)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: settingsKeys.accounts() })
     },
   })
 }
 ```
 
-### Derived Data with `select` (No Local State Copy)
+---
 
-**Compute derived data with `select` or `useMemo`. Don't duplicate with `useState`.**
+## Event/Effect Layer (app/events)
+
+### When to Use app/events
+
+**Use feature hooks (queries/mutations)** when:
+- Side effect is local to feature
+- Simple API call + invalidation
+- No cross-feature coordination
+
+**Use app/events** when:
+- Orchestration spans multiple features
+- Complex flow (API + analytics + logging + multiple invalidations)
+- Need centralized error handling
+- Want testable, isolated effect implementations
+- Need to decouple from router (testability)
+
+### Command Pattern (Navigation)
 
 ```typescript
-// ❌ BAD: Copying server state to local state
-function Page() {
-  const { data } = useAccounts()
-  const [activeAccounts, setActiveAccounts] = useState<Account[]>([])
+// app/events/types.ts (EXAMPLE)
+export type Command =
+  | { type: 'NAVIGATE'; to: string }
+  | { type: 'INVALIDATE_QUERY'; queryKey: unknown[] }
 
-  useEffect(() => {
-    if (data) {
-      setActiveAccounts(data.filter(a => a.status === 'active'))
-    }
-  }, [data])
-
-  return <div>{activeAccounts.length}</div>
-}
-
-// ✅ GOOD: Compute derived data with select
-function Page() {
-  const { data: activeAccounts } = useQuery({
-    queryKey: settingsKeys.accounts(),
-    queryFn: settingsApi.getAccounts,
-    select: (accounts) => accounts.filter(a => a.status === 'active'),
+// app/routes/settings/create-department.tsx (EXAMPLE)
+export function CreateDepartmentPage() {
+  const navigate = useNavigate()
+  const { mutate } = useAddDepartment({
+    onCommand: (cmd) => {
+      if (cmd.type === 'NAVIGATE') navigate(cmd.to)
+    },
   })
-
-  return <div>{activeAccounts?.length ?? 0}</div>
-}
-
-// ✅ GOOD: Compute derived data with useMemo
-function Page() {
-  const { data } = useAccounts()
-  const activeAccounts = useMemo(
-    () => data?.filter(a => a.status === 'active') ?? [],
-    [data]
-  )
-
-  return <div>{activeAccounts.length}</div>
+  return <CreateDepartmentForm onSubmit={mutate} />
 }
 ```
 
----
-
-## Page Example: Subscribe → Render → Event
-
-**Pure subscription-driven UI with no useEffect, no toast calls.**
+### Effect Handlers
 
 ```typescript
-// pages/settings/accounts/index.tsx
-import { useAccounts } from '@/features/settings/queries/use-accounts'
-import { useDepartments } from '@/features/settings/queries/use-departments'
-import { useAddDepartment } from '@/features/settings/mutations/use-add-department'
-import { RequireRole } from '@/components/auth/require-role'
-
-export default function AccountManagementPage() {
-  return (
-    <RequireRole role="admin">
-      <AccountManagementContent />
-    </RequireRole>
-  )
-}
-
-function AccountManagementContent() {
-  // Subscribe only (no side effects)
-  const { data: accounts, isLoading: loadingAccounts } = useAccounts()
-  const { data: departments, isLoading: loadingDepartments } = useDepartments()
-  const { mutate: addDepartment, isPending } = useAddDepartment()
-
-  // Event handler (just dispatch to mutation)
-  const handleAddDepartment = (name: string) => {
-    addDepartment({ name })
-    // Side effects handled by mutation (invalidateQueries) or QueryClient (toast)
-  }
-
-  // Display branching (rendering only, no side effects)
-  if (loadingAccounts || loadingDepartments) {
-    return <Spinner />
-  }
-
-  return (
-    <div>
-      <h1>Account Management</h1>
-
-      <section>
-        <h2>Accounts</h2>
-        <AccountList accounts={accounts ?? []} />
-      </section>
-
-      <section>
-        <h2>Departments</h2>
-        <DepartmentList
-          departments={departments ?? []}
-          onAdd={handleAddDepartment}
-          isAdding={isPending}
-        />
-      </section>
-    </div>
-  )
+// app/effects/analytics.effects.ts (EXAMPLE)
+export const analyticsEffects = {
+  trackEvent: (name: string, props?: Record<string, any>) => {
+    console.log('Analytics:', name, props)
+  },
 }
 ```
 
-**Key points:**
-- No useEffect
-- No toast calls (QueryClient handles it)
-- Display branching only with data/isLoading
-- Events dispatched to mutations (invalidateQueries defined in mutation)
+### Cross-feature Subscriptions
+
+```typescript
+// app/subs/cross-feature.subs.ts (EXAMPLE)
+export function useAccountsWithStats() {
+  const { data: accounts } = useAccounts()
+  const { data: stats } = useDashboardStats()
+  return useMemo(() => {
+    if (!accounts || !stats) return []
+    return accounts.map(a => ({ ...a, activityCount: stats.activityByAccount[a.id] ?? 0 }))
+  }, [accounts, stats])
+}
+```
 
 ---
 
-## State Management (State Hierarchy)
+## State Management
 
 ### Server State: TanStack Query (Required)
 
-**Data fetched from API managed with TanStack Query.**
-
-- Don't duplicate with `useState`
-- Don't fetch with `useEffect`
-- Use queryKey factory
-- Reactive updates via `invalidateQueries`
+No `useState + useEffect` for fetching. Use queryKey factory. Reactive updates via `invalidateQueries`.
 
 ### Local UI State: useState / react-hook-form
 
-**UI-local state (form input, modal open/close, tab selection) managed with `useState`.**
+Component-local state (form input, modal, tab selection).
+
+### Application State: jotai (Minimal)
+
+Small cross-page UI state only (sidebar open, theme). Don't store server data in atoms.
 
 ```typescript
-// ✅ GOOD: UI local state
-function SearchBar() {
-  const [query, setQuery] = useState('')
-  const debouncedQuery = useDebounce(query, 300)
+// app/store/ui.atoms.ts (EXAMPLE)
+import { atom } from 'jotai'
 
-  const { data } = useSearchResults(debouncedQuery)
-
-  return (
-    <div>
-      <input value={query} onChange={e => setQuery(e.target.value)} />
-      <SearchResults results={data ?? []} />
-    </div>
-  )
-}
-
-function Modal({ isOpen, onClose }: ModalProps) {
-  // Local state within modal
-  const [step, setStep] = useState(1)
-
-  return (
-    <Dialog open={isOpen} onClose={onClose}>
-      {step === 1 && <Step1 onNext={() => setStep(2)} />}
-      {step === 2 && <Step2 onBack={() => setStep(1)} />}
-    </Dialog>
-  )
-}
-```
-
-### Cross-Page UI State: Only When Needed, Keep Small
-
-**Introduce small cross-page state (jotai/zustand etc) only when necessary.**
-
-- Don't create huge Context/Reducer upfront
-- Don't put server state in Context (subscribe via TanStack Query)
-- Don't put derived data in Context (compute with useMemo / select)
-
-```typescript
-// ✅ GOOD: Small UI state only (theme, sidebar toggle etc)
-import { atom, useAtom } from 'jotai'
-
-const sidebarOpenAtom = atom(true)
-
-export function useSidebar() {
-  return useAtom(sidebarOpenAtom)
-}
-
-// ❌ BAD: Duplicate server state in Context/Atom
-const accountsAtom = atom<Account[]>([])  // Should be managed by TanStack Query
-```
-
-### Context + Reducer is "Last Resort"
-
-**Use Context + Reducer only when complex UI state is needed.**
-
-- Don't use for server state (use TanStack Query)
-- Don't use for form state (use react-hook-form)
-- Consider lightweight libraries (jotai/zustand) for cross-page state
-
-```typescript
-// ✅ GOOD: Complex UI state (multi-step wizard etc)
-type WizardState = {
-  step: number
-  formData: Partial<CreateAccountInput>
-  validationErrors: Record<string, string>
-}
-
-type WizardAction =
-  | { type: 'NEXT_STEP' }
-  | { type: 'PREV_STEP' }
-  | { type: 'UPDATE_FORM'; payload: Partial<CreateAccountInput> }
-  | { type: 'SET_ERRORS'; payload: Record<string, string> }
-
-function wizardReducer(state: WizardState, action: WizardAction): WizardState {
-  switch (action.type) {
-    case 'NEXT_STEP':
-      return { ...state, step: state.step + 1 }
-    case 'PREV_STEP':
-      return { ...state, step: Math.max(1, state.step - 1) }
-    case 'UPDATE_FORM':
-      return { ...state, formData: { ...state.formData, ...action.payload } }
-    case 'SET_ERRORS':
-      return { ...state, validationErrors: action.payload }
-    default:
-      return state
-  }
-}
-
-// Use only within Wizard (not global)
-function CreateAccountWizard() {
-  const [state, dispatch] = useReducer(wizardReducer, {
-    step: 1,
-    formData: {},
-    validationErrors: {},
-  })
-
-  // ...
-}
+export const sidebarOpenAtom = atom(true)
+export const themeAtom = atom<'light' | 'dark'>('light')
+export const isDarkModeAtom = atom((get) => get(themeAtom) === 'dark')
 ```
 
 ---
 
 ## Component Patterns
 
-### Composition
-
-**Combine small components.**
+### Container / Presenter
 
 ```typescript
-// ✅ GOOD: Split small and compose
-export function Card({ children, variant = 'default' }: CardProps) {
-  return <div className={`card card-${variant}`}>{children}</div>
-}
+// features/settings/components/AccountList.tsx (EXAMPLE)
 
-export function CardHeader({ children }: { children: React.ReactNode }) {
-  return <div className="card-header">{children}</div>
-}
-
-export function CardBody({ children }: { children: React.ReactNode }) {
-  return <div className="card-body">{children}</div>
-}
-
-// Usage
-<Card variant="elevated">
-  <CardHeader>
-    <h2>Title</h2>
-  </CardHeader>
-  <CardBody>
-    <p>Content</p>
-  </CardBody>
-</Card>
-```
-
-### Compound Components
-
-**Share state between parent and children using Context.**
-
-```typescript
-const TabsContext = createContext<{
-  activeTab: string
-  setActiveTab: (tab: string) => void
-} | undefined>(undefined)
-
-function useTabs() {
-  const context = useContext(TabsContext)
-  if (!context) throw new Error('Tabs components must be used within <Tabs>')
-  return context
-}
-
-export function Tabs({ children, defaultTab }: TabsProps) {
-  const [activeTab, setActiveTab] = useState(defaultTab)
-
-  return (
-    <TabsContext.Provider value={{ activeTab, setActiveTab }}>
-      <div className="tabs">{children}</div>
-    </TabsContext.Provider>
-  )
-}
-
-export function Tab({ id, children }: { id: string; children: React.ReactNode }) {
-  const { activeTab, setActiveTab } = useTabs()
-
-  return (
-    <button
-      className={activeTab === id ? 'tab active' : 'tab'}
-      onClick={() => setActiveTab(id)}
-    >
-      {children}
-    </button>
-  )
-}
-
-export function TabPanel({ id, children }: { id: string; children: React.ReactNode }) {
-  const { activeTab } = useTabs()
-  if (activeTab !== id) return null
-  return <div className="tab-panel">{children}</div>
-}
-
-// Usage
-<Tabs defaultTab="overview">
-  <Tab id="overview">Overview</Tab>
-  <Tab id="analytics">Analytics</Tab>
-
-  <TabPanel id="overview"><Overview /></TabPanel>
-  <TabPanel id="analytics"><Analytics /></TabPanel>
-</Tabs>
-```
-
-### Container / Presenter (Subscribe / Render)
-
-**Separate subscription in Container, rendering in Presenter.**
-
-```typescript
-// ✅ GOOD: Container (subscribe, define events)
-function AccountListContainer() {
+// Container: Subscribe + wire events
+export function AccountListContainer() {
   const { data, isLoading, isError } = useAccounts()
   const { mutate: deleteAccount } = useDeleteAccount()
 
   if (isLoading) return <Spinner />
   if (isError) return <ErrorView />
 
-  return (
-    <AccountListPresenter
-      accounts={data ?? []}
-      onDelete={deleteAccount}
-    />
-  )
+  return <AccountListPresenter accounts={data ?? []} onDelete={deleteAccount} />
 }
 
-// Presenter (pure rendering)
+// Presenter: Pure render (props → JSX)
 interface AccountListPresenterProps {
   accounts: Account[]
   onDelete: (id: string) => void
@@ -640,173 +597,140 @@ function AccountListPresenter({ accounts, onDelete }: AccountListPresenterProps)
 }
 ```
 
-### Render Props for Rendering Flexibility Only
+---
 
-**Use Render Props for "rendering flexibility". Don't use for data fetching (use TanStack Query).**
+## Forms
+
+Use `react-hook-form` + `zod` for forms.
 
 ```typescript
-// ❌ BAD: Render Props for data fetching (prohibited)
-function DataLoader({ url, children }: { url: string; children: (data: any) => ReactNode }) {
-  const [data, setData] = useState(null)
-  useEffect(() => { fetch(url).then(r => r.json()).then(setData) }, [url])
-  return <>{children(data)}</>
-}
+// EXAMPLE
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 
-// ✅ GOOD: Render Props for rendering flexibility
-function List<T>({
-  items,
-  renderItem
-}: {
-  items: T[]
-  renderItem: (item: T) => ReactNode
-}) {
+const schema = z.object({
+  name: z.string().min(1).max(200),
+  email: z.string().email(),
+})
+
+type FormData = z.infer<typeof schema>
+
+export function CreateForm({ onSubmit }: { onSubmit: (data: FormData) => void }) {
+  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
+    resolver: zodResolver(schema),
+  })
+
   return (
-    <ul>
-      {items.map((item, index) => (
-        <li key={index}>{renderItem(item)}</li>
-      ))}
-    </ul>
+    <form onSubmit={handleSubmit(onSubmit)}>
+      <input {...register('name')} />
+      {errors.name && <span>{errors.name.message}</span>}
+      <button type="submit">Create</button>
+    </form>
   )
 }
-
-// Usage
-<List
-  items={accounts}
-  renderItem={account => <AccountCard account={account} />}
-/>
 ```
 
 ---
 
-## Custom Hooks
+## Error Handling
 
-### Toggle / Counter (UI state)
+### Request Errors
 
-```typescript
-// ✅ GOOD: UI local state management
-export function useToggle(initialValue = false) {
-  const [value, setValue] = useState(initialValue)
+Normalize to `ApiError` in API layer. Opt-in mutation error toast via meta. Use `isError` for UI display branching (not toast).
 
-  const toggle = useCallback(() => setValue(v => !v), [])
-  const setTrue = useCallback(() => setValue(true), [])
-  const setFalse = useCallback(() => setValue(false), [])
+**Status-based**:
+- 401/403: Auth UI redirect (no toast)
+- 422: Form errors (no toast)
+- 5xx: Opt-in toast for critical mutations
 
-  return { value, toggle, setTrue, setFalse }
-}
+### Render Errors
 
-// Usage
-function Page() {
-  const modal = useToggle()
-
-  return (
-    <>
-      <button onClick={modal.setTrue}>Open</button>
-      <Modal isOpen={modal.value} onClose={modal.setFalse} />
-    </>
-  )
-}
-```
-
-### Debounce
-
-```typescript
-export function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value)
-
-  useEffect(() => {
-    const handler = setTimeout(() => setDebouncedValue(value), delay)
-    return () => clearTimeout(handler)
-  }, [value, delay])
-
-  return debouncedValue
-}
-
-// Usage
-function SearchBar() {
-  const [query, setQuery] = useState('')
-  const debouncedQuery = useDebounce(query, 300)
-
-  const { data } = useSearchResults(debouncedQuery)
-
-  return (
-    <div>
-      <input value={query} onChange={e => setQuery(e.target.value)} />
-      <SearchResults results={data ?? []} />
-    </div>
-  )
-}
-```
-
-### Local Storage
-
-```typescript
-export function useLocalStorage<T>(key: string, initialValue: T) {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const item = window.localStorage.getItem(key)
-      return item ? JSON.parse(item) : initialValue
-    } catch {
-      return initialValue
-    }
-  })
-
-  const setStoredValue = useCallback(
-    (newValue: T | ((prev: T) => T)) => {
-      setValue(prev => {
-        const valueToStore = newValue instanceof Function ? newValue(prev) : newValue
-        window.localStorage.setItem(key, JSON.stringify(valueToStore))
-        return valueToStore
-      })
-    },
-    [key]
-  )
-
-  return [value, setStoredValue] as const
-}
-
-// Usage
-const [theme, setTheme] = useLocalStorage('theme', 'dark')
-```
+ErrorBoundary for render-time exceptions only.
 
 ---
 
 ## Performance
 
-### Avoid Premature Optimization
+**Profile first, optimize second.** Write working code → profile (React DevTools Profiler, Chrome DevTools) → optimize where needed.
 
-**Don't overuse `useMemo/useCallback` unnecessarily.**
+### JavaScript Performance
 
-- Write working code first
-- Profile to find slow parts
-- Optimize only where needed
+**Cache repeated function calls with module-level Map.**
 
 ```typescript
-// ❌ BAD: Unnecessary useMemo
-function Component({ count }: { count: number }) {
-  const doubled = useMemo(() => count * 2, [count])  // Unnecessary
-  return <div>{doubled}</div>
+// Module-level cache (reusable across renders)
+const slugifyCache = new Map<string, string>()
+
+function cachedSlugify(text: string): string {
+  if (slugifyCache.has(text)) return slugifyCache.get(text)!
+  const result = slugify(text)
+  slugifyCache.set(text, result)
+  return result
 }
 
-// ✅ GOOD: If computation is cheap, just compute
-function Component({ count }: { count: number }) {
-  const doubled = count * 2
-  return <div>{doubled}</div>
-}
-
-// ✅ GOOD: useMemo for expensive computation
-function Component({ items }: { items: Item[] }) {
-  const sorted = useMemo(
-    () => items.slice().sort((a, b) => complexComparison(a, b)),
-    [items]
+function ProjectList({ projects }: { projects: Project[] }) {
+  return (
+    <div>
+      {projects.map(project => (
+        <ProjectCard key={project.id} slug={cachedSlugify(project.name)} />
+      ))}
+    </div>
   )
-  return <List items={sorted} />
 }
 ```
 
-### React.memo for Pure Components
+**⚠️ Cache Size Management**: Module-level Maps grow unbounded. For user-generated inputs, add size limits (e.g., `if (cache.size > 1000) cache.clear()`) or use LRU cache libraries to prevent memory leaks.
+
+**Use Set/Map for O(1) lookups instead of Array.includes (O(n)).**
 
 ```typescript
-// ✅ GOOD: Pure Presenter component
+// ❌ BAD: O(n) per check
+const allowedIds = ['a', 'b', 'c', ...]
+items.filter(item => allowedIds.includes(item.id))
+
+// ✅ GOOD: O(1) per check
+const allowedIds = new Set(['a', 'b', 'c', ...])
+items.filter(item => allowedIds.has(item.id))
+```
+
+### React Performance
+
+**Don't overuse `useMemo/useCallback` unnecessarily.**
+
+```typescript
+// ❌ BAD: Unnecessary useMemo
+const doubled = useMemo(() => count * 2, [count])
+
+// ✅ GOOD: If computation is cheap, just compute
+const doubled = count * 2
+
+// ✅ GOOD: useMemo for expensive computation
+const sorted = useMemo(
+  () => items.slice().sort((a, b) => complexComparison(a, b)),
+  [items]
+)
+```
+
+**Use lazy state initialization for expensive initial values.**
+
+```typescript
+// ❌ BAD: buildSearchIndex() runs on EVERY render
+const [searchIndex, setSearchIndex] = useState(buildSearchIndex(items))
+
+// ✅ GOOD: Runs ONLY on initial render
+const [searchIndex, setSearchIndex] = useState(() => buildSearchIndex(items))
+
+// ✅ GOOD: Lazy localStorage read
+const [settings, setSettings] = useState(() => {
+  const stored = localStorage.getItem('settings')
+  return stored ? JSON.parse(stored) : {}
+})
+```
+
+**Use `React.memo` for pure presenter components.**
+
+```typescript
 export const AccountCard = React.memo<{ account: Account }>(({ account }) => {
   return (
     <div className="account-card">
@@ -815,70 +739,56 @@ export const AccountCard = React.memo<{ account: Account }>(({ account }) => {
     </div>
   )
 })
-```
 
-### TanStack Query Cache Settings
-
-```typescript
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60,  // Fresh for 1 minute (no refetch)
-      cacheTime: 1000 * 60 * 5,  // Keep cache for 5 minutes
-      refetchOnWindowFocus: true,  // Refetch on window focus
-      retry: 1,
-    },
-  },
+// For expensive work, extract to memoized component to enable early returns
+const UserAvatar = memo(function UserAvatar({ user }: { user: User }) {
+  const id = useMemo(() => computeAvatarId(user), [user])
+  return <Avatar id={id} />
 })
-```
 
-### Virtualization (Large Lists)
-
-```typescript
-import { useVirtualizer } from '@tanstack/react-virtual'
-
-export function VirtualizedList({ items }: { items: Item[] }) {
-  const parentRef = useRef<HTMLDivElement>(null)
-
-  const virtualizer = useVirtualizer({
-    count: items.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 80,
-    overscan: 5,
-  })
-
-  return (
-    <div ref={parentRef} style={{ height: '600px', overflow: 'auto' }}>
-      <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
-        {virtualizer.getVirtualItems().map(virtualRow => (
-          <div
-            key={virtualRow.index}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: `${virtualRow.size}px`,
-              transform: `translateY(${virtualRow.start}px)`,
-            }}
-          >
-            <ItemCard item={items[virtualRow.index]} />
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+function Profile({ user, loading }: Props) {
+  if (loading) return <Skeleton />  // Skip avatar computation when loading
+  return <div><UserAvatar user={user} /></div>
 }
 ```
 
-### Code Splitting
+### Rendering Optimization
+
+**Use explicit conditional rendering to avoid rendering falsy values.**
+
+```typescript
+// ❌ BAD: Renders "0" when count is 0
+{count && <span className="badge">{count}</span>}
+
+// ✅ GOOD: Renders nothing when count is 0
+{count > 0 ? <span className="badge">{count}</span> : null}
+```
+
+**Hoist static JSX outside components to avoid re-creation.**
+
+```typescript
+// ❌ BAD: Recreates element every render
+function Container() {
+  return <div>{loading && <div className="animate-pulse h-20 bg-gray-200" />}</div>
+}
+
+// ✅ GOOD: Reuses same element reference
+const loadingSkeleton = <div className="animate-pulse h-20 bg-gray-200" />
+
+function Container() {
+  return <div>{loading && loadingSkeleton}</div>
+}
+```
+
+### Bundle Optimization
+
+**Code splitting for routes:**
 
 ```typescript
 import { lazy, Suspense } from 'react'
 
-// ✅ GOOD: Route-based splitting
-const Dashboard = lazy(() => import('./pages/Dashboard'))
-const Settings = lazy(() => import('./pages/Settings'))
+const Dashboard = lazy(() => import('./routes/Dashboard'))
+const Settings = lazy(() => import('./routes/Settings'))
 
 function App() {
   return (
@@ -890,463 +800,117 @@ function App() {
     </Suspense>
   )
 }
+```
 
-// ✅ GOOD: Heavy component splitting
-const HeavyChart = lazy(() => import('./components/HeavyChart'))
+**Dynamic imports for heavy components (charts, editors, large libraries):**
 
-function DashboardPage() {
+```typescript
+import { lazy, Suspense } from 'react'
+
+// ❌ BAD: Monaco bundles with main chunk (~300KB)
+import { MonacoEditor } from './monaco-editor'
+
+// ✅ GOOD: Monaco loads on demand
+const MonacoEditor = lazy(() => import('./monaco-editor').then(m => ({ default: m.MonacoEditor })))
+
+function CodePanel({ code }: { code: string }) {
   return (
-    <div>
-      <Suspense fallback={<ChartSkeleton />}>
-        <HeavyChart data={data} />
-      </Suspense>
-    </div>
+    <Suspense fallback={<EditorSkeleton />}>
+      <MonacoEditor value={code} />
+    </Suspense>
   )
 }
 ```
 
+**Note**: [React Compiler](https://react.dev/learn/react-compiler) auto-optimizes memo/useMemo/hoisting when enabled.
+
 ---
 
-## Forms
+## Security
 
-### react-hook-form Recommended
-
-**Use `react-hook-form` + `zod` for forms.**
+### Authentication (HttpOnly Cookies + CSRF)
 
 ```typescript
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
+// lib/auth.tsx (EXAMPLE)
+const getUser = async () => {
+  const res = await fetch('/api/auth/me')  // Token via HttpOnly cookie
+  if (!res.ok) return null
+  return res.json()
+}
 
-const schema = z.object({
-  name: z.string().min(1, 'Name is required').max(200),
-  email: z.string().email('Invalid email'),
-  description: z.string().min(1, 'Description is required'),
+export const userQueryOptions = queryOptions({
+  queryKey: ['auth', 'user'],
+  queryFn: getUser,
+  staleTime: Infinity,
 })
-
-type FormData = z.infer<typeof schema>
-
-export function CreateDepartmentForm({ onSubmit }: { onSubmit: (data: FormData) => void }) {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
-    resolver: zodResolver(schema),
-  })
-
-  return (
-    <form onSubmit={handleSubmit(onSubmit)}>
-      <div>
-        <input {...register('name')} placeholder="Department name" />
-        {errors.name && <span className="error">{errors.name.message}</span>}
-      </div>
-
-      <div>
-        <input type="email" {...register('email')} placeholder="Email" />
-        {errors.email && <span className="error">{errors.email.message}</span>}
-      </div>
-
-      <div>
-        <textarea {...register('description')} placeholder="Description" />
-        {errors.description && <span className="error">{errors.description.message}</span>}
-      </div>
-
-      <button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? 'Creating...' : 'Create'}
-      </button>
-    </form>
-  )
-}
 ```
 
-### Submit to Mutation
+**⚠️ CSRF Protection**: When using HttpOnly cookies, implement CSRF protection (SameSite=Strict/Lax + CSRF token for state-changing requests). Common patterns: double submit cookie (server sets token in cookie + custom header), or synchronizer token (server embeds token in page, client sends in header). Modern frameworks (Next.js API routes, etc.) often handle this automatically.
 
-**Sync screen updates on submit success with `invalidateQueries` (Reagent-style).**
+**⚠️ Cross-Origin Cookies**: For cross-origin requests with credentials, set `credentials: 'include'` in fetch options and configure CORS properly on the server (Access-Control-Allow-Credentials: true).
 
-```typescript
-function CreateDepartmentPage() {
-  const { mutate: addDepartment } = useAddDepartment({
-    onSuccess: () => {
-      // Reactive update via invalidateQueries
-      queryClient.invalidateQueries({ queryKey: settingsKeys.departments() })
-      toast.success('Department added')
-      navigate('/settings/departments')
-    },
-  })
+### Authorization (RBAC/PBAC)
 
-  return (
-    <CreateDepartmentForm onSubmit={addDepartment} />
-  )
-}
-```
-
-### Don't Mix Form State with Server State
-
-**Keep form state and server state separate.**
+**⚠️ Server-Side Validation Required**: UI authorization checks (like `<Authorization>` component) are for UX only. The server MUST validate all permissions for every request—never trust client-side checks.
 
 ```typescript
-// ❌ BAD: Copy server state to form initial value via useState
-function EditAccountForm({ accountId }: { accountId: string }) {
-  const { data: account } = useAccount(accountId)
-  const [formData, setFormData] = useState({ name: '', email: '' })
-
-  useEffect(() => {
-    if (account) {
-      setFormData({ name: account.name, email: account.email })
-    }
-  }, [account])
-
-  // ...
-}
-
-// ✅ GOOD: Set initial value with react-hook-form's reset
-function EditAccountForm({ accountId }: { accountId: string }) {
-  const { data: account } = useAccount(accountId)
-  const { register, handleSubmit, reset } = useForm<FormData>()
-
-  useEffect(() => {
-    if (account) {
-      reset({ name: account.name, email: account.email })
-    }
-  }, [account, reset])
-
-  // ...
-}
-```
-
----
-
-## Error Handling
-
-### Separate into Two Layers
-
-#### 1. Request Errors
-
-**Normalize to `ApiError` in API layer, global toast in QueryClient.**
-
-- Don't call `toast()` in pages
-- Use `isError` only for display branching, not side effects
-
-```typescript
-// ✅ GOOD: Display branching only
-function Page() {
-  const { data, isLoading, isError } = useAccounts()
-
-  if (isLoading) return <Spinner />
-  if (isError) return <ErrorView message="Failed to load data" />
-
-  return <AccountList accounts={data} />
-}
-
-// ❌ BAD: useEffect for toast (already displayed at global layer)
-function Page() {
-  const { data, isError } = useAccounts()
-
-  useEffect(() => {
-    if (isError) {
-      toast.error('An error occurred')  // Duplicate
-    }
-  }, [isError])
-
-  return <div>...</div>
-}
-```
-
-#### 2. Render Errors
-
-**ErrorBoundary is for render-time exceptions. Cannot catch async request errors.**
-
-```typescript
-interface ErrorBoundaryProps {
-  children: React.ReactNode
-  fallback?: (error: Error, reset: () => void) => React.ReactNode
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean
-  error: Error | null
-}
-
-export class ErrorBoundary extends React.Component<
-  ErrorBoundaryProps,
-  ErrorBoundaryState
-> {
-  state: ErrorBoundaryState = {
-    hasError: false,
-    error: null,
-  }
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error }
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, errorInfo)
-    // Send to error reporting service
-  }
-
-  reset = () => {
-    this.setState({ hasError: false, error: null })
-  }
-
-  render() {
-    if (this.state.hasError && this.state.error) {
-      if (this.props.fallback) {
-        return this.props.fallback(this.state.error, this.reset)
-      }
-
-      return (
-        <div className="error-fallback">
-          <h2>An unexpected error occurred</h2>
-          <p>{this.state.error.message}</p>
-          <button onClick={this.reset}>Retry</button>
-        </div>
-      )
-    }
-
-    return this.props.children
-  }
+// lib/authorization.tsx (EXAMPLE)
+export function Authorization({ allowedRoles, policyCheck, children }: AuthorizationProps) {
+  const { data: user } = useUser()
+  if (!user) return null
+  if (allowedRoles && !allowedRoles.includes(user.role)) return null
+  if (policyCheck !== undefined && !policyCheck) return null
+  return <>{children}</>
 }
 
 // Usage
-<ErrorBoundary>
-  <App />
-</ErrorBoundary>
+<Authorization allowedRoles={['admin']}><AdminPanel /></Authorization>
+<Authorization policyCheck={comment.authorId === user?.id}><DeleteButton /></Authorization>
 ```
 
-**Note: Don't use ErrorBoundary for request error toasts.**
-
----
-
-## Accessibility
-
-### Keyboard Navigation
+### XSS Protection
 
 ```typescript
-export function Dropdown({ options, onSelect }: DropdownProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const [activeIndex, setActiveIndex] = useState(0)
+// EXAMPLE
+import DOMPurify from 'dompurify'
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault()
-        if (isOpen) {
-          setActiveIndex(i => Math.min(i + 1, options.length - 1))
-        } else {
-          setIsOpen(true)
-        }
-        break
-
-      case 'ArrowUp':
-        e.preventDefault()
-        if (isOpen) {
-          setActiveIndex(i => Math.max(i - 1, 0))
-        }
-        break
-
-      case 'Enter':
-      case ' ':
-        e.preventDefault()
-        if (isOpen) {
-          onSelect(options[activeIndex])
-          setIsOpen(false)
-        } else {
-          setIsOpen(true)
-        }
-        break
-
-      case 'Escape':
-        setIsOpen(false)
-        break
-    }
-  }
-
-  return (
-    <div onKeyDown={handleKeyDown}>
-      <button
-        role="combobox"
-        aria-expanded={isOpen}
-        aria-haspopup="listbox"
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        Select option
-      </button>
-
-      {isOpen && (
-        <ul role="listbox">
-          {options.map((option, index) => (
-            <li
-              key={option.id}
-              role="option"
-              aria-selected={index === activeIndex}
-              onClick={() => onSelect(option)}
-            >
-              {option.label}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-```
-
-### Focus Management (Modal)
-
-```typescript
-export function Modal({ isOpen, onClose, children }: ModalProps) {
-  const modalRef = useRef<HTMLDivElement>(null)
-  const previousFocusRef = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (isOpen) {
-      // Save currently focused element
-      previousFocusRef.current = document.activeElement as HTMLElement
-
-      // Focus first focusable element in modal
-      const firstFocusable = modalRef.current?.querySelector<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      )
-      firstFocusable?.focus()
-
-      // Trap focus within modal with Tab key
-      const handleTab = (e: KeyboardEvent) => {
-        if (e.key !== 'Tab') return
-
-        const focusableElements = modalRef.current?.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        )
-        if (!focusableElements) return
-
-        const first = focusableElements[0]
-        const last = focusableElements[focusableElements.length - 1]
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault()
-          last.focus()
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
-      }
-
-      document.addEventListener('keydown', handleTab)
-      return () => document.removeEventListener('keydown', handleTab)
-    } else {
-      // Restore focus when closing modal
-      previousFocusRef.current?.focus()
-    }
-  }, [isOpen])
-
-  if (!isOpen) return null
-
-  return (
-    <div
-      ref={modalRef}
-      role="dialog"
-      aria-modal="true"
-      onKeyDown={e => e.key === 'Escape' && onClose()}
-    >
-      {children}
-    </div>
-  )
+export function MDPreview({ content }: { content: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }} />
 }
 ```
 
 ---
 
-## Advanced: Global Success Toast (Optional)
+## Testing
 
-**Use mutationKey and branch in MutationCache.onSuccess.**
+**Priority**: Integration tests (primary) → E2E (critical flows) → Unit tests (shared utils only).
+
+**Tools**: Vitest, Testing Library, Playwright, MSW.
 
 ```typescript
-// lib/query-client.ts
-export const queryClient = new QueryClient({
-  mutationCache: new MutationCache({
-    onSuccess: (_data, _variables, _context, mutation) => {
-      // Branch by mutationKey
-      const key = mutation.options.mutationKey?.[0]
-
-      if (key === 'addDepartment') {
-        toast.success('Department added')
-      } else if (key === 'updateAccount') {
-        toast.success('Account updated')
-      }
-      // Default: do nothing
-    },
-    onError: (error) => {
-      if (error instanceof ApiError) {
-        toast.error(`Operation failed: ${error.message}`)
-      } else {
-        toast.error('An unexpected error occurred')
-      }
-    },
-  }),
+// features/settings/components/__tests__/account-list.test.tsx (EXAMPLE)
+test('deletes account on click', async () => {
+  render(<AccountListContainer />)
+  await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument())
+  await userEvent.click(screen.getByRole('button', { name: /delete/i }))
+  await waitFor(() => expect(screen.queryByText('John Doe')).not.toBeInTheDocument())
 })
-
-// mutations/use-add-department.ts
-export function useAddDepartment() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationKey: ['addDepartment'],  // Define key
-    mutationFn: settingsApi.addDepartment,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: settingsKeys.departments() })
-    },
-  })
-}
 ```
 
 ---
 
-## Supplement: Integration with Next.js App Router
+## Project Standards
 
-**Even when using Next.js App Router Server Components / Route Handlers, TanStack Query remains the standard.**
-
-- Server Components: Initial data fetch (SSR)
-- Client Components: Dynamic updates with TanStack Query
-- Route Handlers: API endpoints
-
-```typescript
-// app/settings/accounts/page.tsx (Server Component)
-import { getAccounts } from '@/api/settings-server'
-import { AccountListClient } from './client'
-
-export default async function AccountsPage() {
-  const initialAccounts = await getAccounts()
-
-  return <AccountListClient initialAccounts={initialAccounts} />
-}
-
-// app/settings/accounts/client.tsx (Client Component)
-'use client'
-
-import { useAccounts } from '@/features/settings/queries/use-accounts'
-
-export function AccountListClient({ initialAccounts }: { initialAccounts: Account[] }) {
-  const { data } = useAccounts({
-    initialData: initialAccounts,  // Use SSR data as initial
-  })
-
-  return <AccountList accounts={data} />
-}
-```
+- **ESLint + Prettier + TypeScript + Husky**: Code quality, formatting, type safety, pre-commit hooks
+- **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/components/ui/card'`)
+- **File Naming**: kebab-case (`account-list.tsx`), enforce with ESLint `check-file` plugin
+- **File Size**: Target 100-200 lines, max 400 lines per `.ts`/`.tsx` file for readability
+  - **If exceeding 400 lines**:
+    - Components: Split into Container/Presenter or extract sub-components
+    - Hooks: Split queries/mutations into separate files
+    - API clients: Split by resource (e.g., `accounts.api.ts`, `departments.api.ts`)
+    - Utils: Split by responsibility (e.g., `date.utils.ts`, `string.utils.ts`)
 
 ---
 
-## Reagent-inspired Checklist (Self-Check)
-
-Verify the following:
-
-- [ ] `useEffect` is limited to UI-local concerns (DOM/focus/measurement)
-- [ ] Data fetching uses TanStack Query only (no custom fetch hooks)
-- [ ] Error toasts displayed at global layer (QueryCache/MutationCache or interceptor)
-- [ ] No toast calls in pages/components (success toasts externalized when possible)
-- [ ] No duplicate server state management with local state
-- [ ] Using queryKey factory (no hardcoded strings)
-- [ ] Mutation success syncs via `invalidateQueries`
-- [ ] UI follows "subscribe → render → event" flow
-- [ ] Side effects (API calls, toasts, navigation) aggregated at boundaries
-
----
-
-**Remember**: Write working code first. Optimize after measuring. Add complexity only when needed.
+**Remember**: Write working code first. Optimize after measuring. Add complexity only when needed. Use bulletproof structure for organization, re-frame principles for behavior.
