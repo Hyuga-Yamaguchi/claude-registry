@@ -97,7 +97,7 @@ class User:
 
 ### When to Use `Any`
 
-Use `Any` only at system boundaries. Document the reason.
+Use `Any` only at system boundaries (external APIs, legacy code). Document the reason.
 
 ```python
 from typing import Any
@@ -113,6 +113,8 @@ def parse_external_api(response: dict[str, Any]) -> User:
         email=str(response["email"]),
     )
 ```
+
+**Boundary exception**: Public APIs at system boundaries may use `Any` with documentation. Internal public APIs should avoid `Any`.
 
 ### Use Literal for Fixed Values
 
@@ -174,14 +176,26 @@ def parse_config(config_str: str) -> dict:
         raise ValueError("Invalid config format") from e
 ```
 
-### Result Pattern
+### Result Pattern (Optional)
 
-For expected domain errors, use Success/Failure pattern. Return type is always `Success[T] | Failure[E]`.
+For expected domain errors, consider Success/Failure pattern when explicit error modeling improves readability. Use exceptions for unexpected errors.
+
+**When to use Result**:
+- Validation with multiple failure modes
+- Parsing with expected failures
+- Domain operations with business rule violations
+
+**When to use exceptions**:
+- Unexpected errors (network failures, programming errors)
+- Framework/library integration (most Python code uses exceptions)
 
 ```python
 import json
+import logging
 from dataclasses import dataclass
 from typing import Generic, TypeVar
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 E = TypeVar("E")
@@ -303,7 +317,13 @@ all_active = all(user.active for user in users)
 ### Single Responsibility
 
 ```python
-def calculate_total(items: list[dict[str, float]]) -> float:
+from typing import TypedDict
+
+class LineItem(TypedDict):
+    price: float
+    quantity: int
+
+def calculate_total(items: list[LineItem]) -> float:
     return sum(item["price"] * item["quantity"] for item in items)
 
 def validate_email(email: str) -> bool:
@@ -377,7 +397,9 @@ if retry_count > MAX_RETRIES:
     raise MaxRetriesExceeded()
 
 # Avoid deep nesting - use early returns
-def process_data(data: dict | None) -> Success[dict] | Failure[str]:
+def process_data(
+    data: dict[str, object] | None,
+) -> Success[dict[str, object]] | Failure[str]:
     if data is None:
         return Failure("No data")
     if not data.get("is_valid"):
@@ -417,7 +439,7 @@ CI must enforce:
 - Ruff linting (zero errors)
 - Ruff formatting check
 - pyright strict mode
-- No implicit `Any` in public APIs
+- No implicit `Any` in public APIs (except documented boundary cases)
 
 ## Public API Definition
 
@@ -430,7 +452,7 @@ Public API requirements:
 - Must have type annotations
 - Must have docstrings
 - Must validate external inputs
-- Must not use `Any` without documentation
+- Should avoid `Any` (boundary exceptions documented)
 
 Private code (`_` prefix):
 - May omit docstrings if obvious
