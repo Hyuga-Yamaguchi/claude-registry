@@ -453,6 +453,8 @@ function AccountListPresenter({ accounts, onDelete }: AccountListPresenterProps)
 
 ## Forms
 
+Use `react-hook-form` + `zod` for forms.
+
 ```typescript
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -465,7 +467,7 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>
 
-export function CreateDepartmentForm({ onSubmit }: { onSubmit: (data: FormData) => void }) {
+export function CreateForm({ onSubmit }: { onSubmit: (data: FormData) => void }) {
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
   })
@@ -501,29 +503,193 @@ ErrorBoundary for render-time exceptions only.
 
 ## Performance
 
-**Profile first, optimize second.** Write working code → profile → optimize where needed.
+**Profile first, optimize second.** Write working code → profile (React DevTools Profiler, Chrome DevTools) → optimize where needed.
 
-### JavaScript
+### JavaScript Performance
 
-- Cache repeated function calls (module-level Map)
-- Combine array iterations
-- Use Set/Map for O(1) lookups
+**Cache repeated function calls with module-level Map.**
 
-### React
+```typescript
+// Module-level cache (reusable across renders)
+const slugifyCache = new Map<string, string>()
 
-- Lazy state initialization: `useState(() => expensiveInit())`
-- `React.memo` for pure presenters
-- Don't overuse `useMemo/useCallback` (only for expensive computation)
+function cachedSlugify(text: string): string {
+  if (slugifyCache.has(text)) return slugifyCache.get(text)!
+  const result = slugify(text)
+  slugifyCache.set(text, result)
+  return result
+}
 
-### Rendering
+function ProjectList({ projects }: { projects: Project[] }) {
+  return (
+    <div>
+      {projects.map(project => (
+        <ProjectCard key={project.id} slug={cachedSlugify(project.name)} />
+      ))}
+    </div>
+  )
+}
+```
 
-- Explicit conditionals: `{count > 0 ? <Badge /> : null}` (not `{count && <Badge />}`)
-- Hoist static JSX outside components
+**Combine multiple array iterations into one loop.**
 
-### Bundle
+```typescript
+// ❌ BAD: 3 iterations over users array
+const admins = users.filter(u => u.isAdmin)
+const testers = users.filter(u => u.isTester)
+const inactive = users.filter(u => !u.isActive)
 
-- Code split routes (`lazy()`)
-- Dynamic import heavy components (Monaco, charts)
+// ✅ GOOD: 1 iteration
+const admins: User[] = []
+const testers: User[] = []
+const inactive: User[] = []
+
+for (const user of users) {
+  if (user.isAdmin) admins.push(user)
+  if (user.isTester) testers.push(user)
+  if (!user.isActive) inactive.push(user)
+}
+```
+
+**Use Set/Map for O(1) lookups instead of Array.includes (O(n)).**
+
+```typescript
+// ❌ BAD: O(n) per check
+const allowedIds = ['a', 'b', 'c', ...]
+items.filter(item => allowedIds.includes(item.id))
+
+// ✅ GOOD: O(1) per check
+const allowedIds = new Set(['a', 'b', 'c', ...])
+items.filter(item => allowedIds.has(item.id))
+```
+
+### React Performance
+
+**Don't overuse `useMemo/useCallback` unnecessarily.**
+
+```typescript
+// ❌ BAD: Unnecessary useMemo
+const doubled = useMemo(() => count * 2, [count])
+
+// ✅ GOOD: If computation is cheap, just compute
+const doubled = count * 2
+
+// ✅ GOOD: useMemo for expensive computation
+const sorted = useMemo(
+  () => items.slice().sort((a, b) => complexComparison(a, b)),
+  [items]
+)
+```
+
+**Use lazy state initialization for expensive initial values.**
+
+```typescript
+// ❌ BAD: buildSearchIndex() runs on EVERY render
+const [searchIndex, setSearchIndex] = useState(buildSearchIndex(items))
+
+// ✅ GOOD: Runs ONLY on initial render
+const [searchIndex, setSearchIndex] = useState(() => buildSearchIndex(items))
+
+// ✅ GOOD: Lazy localStorage read
+const [settings, setSettings] = useState(() => {
+  const stored = localStorage.getItem('settings')
+  return stored ? JSON.parse(stored) : {}
+})
+```
+
+**Use `React.memo` for pure presenter components.**
+
+```typescript
+export const AccountCard = React.memo<{ account: Account }>(({ account }) => {
+  return (
+    <div className="account-card">
+      <h3>{account.name}</h3>
+      <p>{account.email}</p>
+    </div>
+  )
+})
+
+// For expensive work, extract to memoized component to enable early returns
+const UserAvatar = memo(function UserAvatar({ user }: { user: User }) {
+  const id = useMemo(() => computeAvatarId(user), [user])
+  return <Avatar id={id} />
+})
+
+function Profile({ user, loading }: Props) {
+  if (loading) return <Skeleton />  // Skip avatar computation when loading
+  return <div><UserAvatar user={user} /></div>
+}
+```
+
+### Rendering Optimization
+
+**Use explicit conditional rendering to avoid rendering falsy values.**
+
+```typescript
+// ❌ BAD: Renders "0" when count is 0
+{count && <span className="badge">{count}</span>}
+
+// ✅ GOOD: Renders nothing when count is 0
+{count > 0 ? <span className="badge">{count}</span> : null}
+```
+
+**Hoist static JSX outside components to avoid re-creation.**
+
+```typescript
+// ❌ BAD: Recreates element every render
+function Container() {
+  return <div>{loading && <div className="animate-pulse h-20 bg-gray-200" />}</div>
+}
+
+// ✅ GOOD: Reuses same element reference
+const loadingSkeleton = <div className="animate-pulse h-20 bg-gray-200" />
+
+function Container() {
+  return <div>{loading && loadingSkeleton}</div>
+}
+```
+
+### Bundle Optimization
+
+**Code splitting for routes:**
+
+```typescript
+import { lazy, Suspense } from 'react'
+
+const Dashboard = lazy(() => import('./routes/Dashboard'))
+const Settings = lazy(() => import('./routes/Settings'))
+
+function App() {
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
+    </Suspense>
+  )
+}
+```
+
+**Dynamic imports for heavy components (charts, editors, large libraries):**
+
+```typescript
+import { lazy, Suspense } from 'react'
+
+// ❌ BAD: Monaco bundles with main chunk (~300KB)
+import { MonacoEditor } from './monaco-editor'
+
+// ✅ GOOD: Monaco loads on demand
+const MonacoEditor = lazy(() => import('./monaco-editor').then(m => ({ default: m.MonacoEditor })))
+
+function CodePanel({ code }: { code: string }) {
+  return (
+    <Suspense fallback={<EditorSkeleton />}>
+      <MonacoEditor value={code} />
+    </Suspense>
+  )
+}
+```
 
 **Note**: [React Compiler](https://react.dev/learn/react-compiler) auto-optimizes memo/useMemo/hoisting when enabled.
 
