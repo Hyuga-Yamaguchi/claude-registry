@@ -1,0 +1,51 @@
+# Claude Code .gitignore
+
+# Debug logs
+debug/
+
+# File history and session data
+file-history/
+history.jsonl
+session-env/
+
+# IDE lock files
+ide/
+
+# Cache and temporary files
+cache/
+paste-cache/
+stats-cache.json
+
+# Project-specific settings (these are machine-specific)
+projects/
+
+# Shell snapshots
+shell-snapshots/
+
+# Statistics and telemetry
+statsig/
+telemetry/
+
+# Todo files (session-specific)
+todos/
+
+# Planning documents (session-specific)
+plans/
+
+# Reference materials
+everithing-claude-code-references/
+
+# Plugins directory - only track README.md
+plugins/*
+!plugins/README.md
+
+# Local settings (machine-specific)
+.claude/settings.local.json
+
+# Keep these files:
+# - settings.json (global settings)
+# - agents/ (custom agents)
+# - commands/ (custom commands)
+# - skills/ (custom skills)
+# - plans/ (planning documents)
+# - plugins/known_marketplaces.json (marketplace registry)
