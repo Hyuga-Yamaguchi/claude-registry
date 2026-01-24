@@ -41,6 +41,7 @@ For language-level TypeScript standards, see [coding-standards-typescript.md](co
 - **[react-hook-form](https://react-hook-form.com/)** + **[zod](https://github.com/colinhacks/zod)**: Forms/validation
 - **[Tailwind CSS](https://tailwindcss.com/)**: Styling
 - **[sonner](https://sonner.emilkowal.ski/)**: Toast notifications
+- **[DOMPurify](https://github.com/cure53/DOMPurify)**: XSS sanitization (when rendering user HTML)
 
 ### Testing
 - **[Vitest](https://vitest.dev)**, **[Testing Library](https://testing-library.com/)**, **[Playwright](https://playwright.dev)**, **[MSW](https://mswjs.io)**
@@ -98,7 +99,9 @@ function Page() {
 
 ### 2. Event-driven (Change Through Events)
 
-User actions = events (handlers/mutations). Side effects in mutation callbacks or app/events.
+User actions = events. **"Events" = feature mutations/handlers** (entry points for user operations). Side effects in mutation callbacks (`onSuccess`/`onError`).
+
+**Use `app/events`** only for cross-feature orchestration (multiple features, analytics/logging, complex error handling, router decoupling). Don't move all logic to `app/events`—default to feature hooks.
 
 ### 3. Effects at Edges (Side Effects at Boundaries)
 
@@ -141,24 +144,26 @@ import { useDashboard } from '@/features/dashboard'  // From another feature (PR
 
 ```typescript
 // lib/query-client.ts (TypeScript meta augmentation)
-import '@tanstack/react-query'
+import { QueryClient, MutationCache } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { ApiError } from './errors'
 
 declare module '@tanstack/react-query' {
   interface Register {
     defaultError: ApiError
-  }
-  interface QueryMeta {
-    toastError?: boolean  // Opt-in error toast (queries: avoid; mutations: OK)
-  }
-  interface MutationMeta {
-    toastError?: boolean
+    queryMeta: {
+      toastError?: boolean  // Queries: avoid (background refetch spam)
+    }
+    mutationMeta: {
+      toastError?: boolean  // Mutations: opt-in for error toast
+    }
   }
 }
 
 export const queryClient = new QueryClient({
   mutationCache: new MutationCache({
     onError: (error, _vars, _ctx, mutation) => {
-      if (mutation.meta?.toastError && error instanceof ApiError) {
+      if (mutation.meta?.toastError) {
         if (error.status === 401 || error.status === 403 || error.status === 422) return
         toast.error(error.message)
       }
@@ -169,8 +174,9 @@ export const queryClient = new QueryClient({
   },
 })
 
-// features/settings/hooks/mutations/use-add-department.ts
-import type { Department } from '../types'  // ✅ FIX: Import Department
+// features/settings/hooks/mutations/use-add-department.ts (EXAMPLE)
+import type { Department } from '../types'
+import type { Command } from '@/app/events/types'
 
 export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void }) {
   const queryClient = useQueryClient()
@@ -208,27 +214,26 @@ export class ApiError extends Error {
 }
 ```
 
-### HTTP Wrapper (Fixed Content-Type Issue)
+### HTTP Wrapper (Type-safe + FormData support)
 
 ```typescript
 // lib/http.ts
 import { ApiError } from './errors'
 
-export async function http<T>(
+export async function httpJson<T>(
   url: string,
   options?: RequestInit & { signal?: AbortSignal }
 ): Promise<T> {
-  const hasBody = options?.body !== undefined
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      // ✅ FIX: Only add Content-Type if body exists and no custom Content-Type
-      ...(hasBody && !options?.headers?.['Content-Type']
-        ? { 'Content-Type': 'application/json' }
-        : {}),
-      ...options?.headers,
-    },
-  })
+  const headers = new Headers(options?.headers)
+
+  // Only set Content-Type for JSON if body exists and not FormData
+  if (options?.body && !(options.body instanceof FormData)) {
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json')
+    }
+  }
+
+  const res = await fetch(url, { ...options, headers })
 
   if (!res.ok) {
     let errorData: any = {}
@@ -246,11 +251,35 @@ export async function http<T>(
 
   if (res.status === 204) return undefined as T
 
-  const contentType = res.headers.get('content-type')
-  if (contentType?.includes('application/json')) return res.json()
+  return res.json()
+}
 
-  // ✅ Type-safe: If T is string, this is safe; otherwise caller must handle
-  return res.text() as T
+export async function httpText(url: string, options?: RequestInit): Promise<string> {
+  const res = await fetch(url, options)
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
+  return res.text()
+}
+```
+
+### API Client Example
+
+```typescript
+// features/settings/api/settings.api.ts (EXAMPLE)
+import { httpJson } from '@/lib/http'
+import type { Account, Department, CreateDepartmentInput } from '../types'
+
+export const settingsApi = {
+  getAccounts: (signal?: AbortSignal) =>
+    httpJson<Account[]>('/api/settings/accounts', { signal }),
+
+  addDepartment: (data: CreateDepartmentInput) =>
+    httpJson<Department>('/api/settings/departments', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  deleteAccount: (id: string) =>
+    httpJson<void>(`/api/settings/accounts/${id}`, { method: 'DELETE' }),
 }
 ```
 
@@ -261,7 +290,7 @@ export async function http<T>(
 ### QueryKey Factory
 
 ```typescript
-// features/settings/hooks/keys.ts
+// features/settings/hooks/keys.ts (EXAMPLE)
 export const settingsKeys = {
   all: ['settings'] as const,
   accounts: () => [...settingsKeys.all, 'accounts'] as const,
@@ -272,7 +301,7 @@ export const settingsKeys = {
 ### Query Hook (No Toast)
 
 ```typescript
-// features/settings/hooks/queries/use-accounts.ts
+// features/settings/hooks/queries/use-accounts.ts (EXAMPLE)
 export function useAccounts() {
   return useQuery({
     queryKey: settingsKeys.accounts(),
@@ -299,22 +328,26 @@ const { data: activeAccounts } = useQuery({
 **Optimistic UX**: Use `setQueryData` for immediate feedback (e.g., list operations where stale data is acceptable).
 
 ```typescript
-// Optimistic delete example
+// features/settings/hooks/mutations/use-delete-account.ts (EXAMPLE)
+import type { Account } from '../types'
+
 export function useDeleteAccount() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: settingsApi.deleteAccount,
-    onMutate: async (id) => {
+    onMutate: async (id: string) => {
       await queryClient.cancelQueries({ queryKey: settingsKeys.accounts() })
-      const previous = queryClient.getQueryData(settingsKeys.accounts())
-      queryClient.setQueryData(settingsKeys.accounts(), (old: Account[] = []) =>
+      const previous = queryClient.getQueryData<Account[]>(settingsKeys.accounts())
+      queryClient.setQueryData<Account[]>(settingsKeys.accounts(), (old = []) =>
         old.filter(a => a.id !== id)
       )
       return { previous }
     },
     onError: (_err, _vars, context) => {
-      queryClient.setQueryData(settingsKeys.accounts(), context?.previous)
+      if (context?.previous) {
+        queryClient.setQueryData(settingsKeys.accounts(), context.previous)
+      }
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: settingsKeys.accounts() })
@@ -344,12 +377,12 @@ export function useDeleteAccount() {
 ### Command Pattern (Navigation)
 
 ```typescript
-// app/events/types.ts
+// app/events/types.ts (EXAMPLE)
 export type Command =
   | { type: 'NAVIGATE'; to: string }
   | { type: 'INVALIDATE_QUERY'; queryKey: unknown[] }
 
-// app/routes/settings/create-department.tsx
+// app/routes/settings/create-department.tsx (EXAMPLE)
 export function CreateDepartmentPage() {
   const navigate = useNavigate()
   const { mutate } = useAddDepartment({
@@ -364,7 +397,7 @@ export function CreateDepartmentPage() {
 ### Effect Handlers
 
 ```typescript
-// app/effects/analytics.effects.ts
+// app/effects/analytics.effects.ts (EXAMPLE)
 export const analyticsEffects = {
   trackEvent: (name: string, props?: Record<string, any>) => {
     console.log('Analytics:', name, props)
@@ -375,7 +408,7 @@ export const analyticsEffects = {
 ### Cross-feature Subscriptions
 
 ```typescript
-// app/subs/cross-feature.subs.ts
+// app/subs/cross-feature.subs.ts (EXAMPLE)
 export function useAccountsWithStats() {
   const { data: accounts } = useAccounts()
   const { data: stats } = useDashboardStats()
@@ -403,7 +436,7 @@ Component-local state (form input, modal, tab selection).
 Small cross-page UI state only (sidebar open, theme). Don't store server data in atoms.
 
 ```typescript
-// app/store/ui.atoms.ts
+// app/store/ui.atoms.ts (EXAMPLE)
 import { atom } from 'jotai'
 
 export const sidebarOpenAtom = atom(true)
@@ -418,6 +451,8 @@ export const isDarkModeAtom = atom((get) => get(themeAtom) === 'dark')
 ### Container / Presenter
 
 ```typescript
+// features/settings/components/AccountList.tsx (EXAMPLE)
+
 // Container: Subscribe + wire events
 export function AccountListContainer() {
   const { data, isLoading, isError } = useAccounts()
@@ -456,6 +491,7 @@ function AccountListPresenter({ accounts, onDelete }: AccountListPresenterProps)
 Use `react-hook-form` + `zod` for forms.
 
 ```typescript
+// EXAMPLE
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -700,7 +736,7 @@ function CodePanel({ code }: { code: string }) {
 ### Authentication (HttpOnly Cookies + CSRF)
 
 ```typescript
-// lib/auth.tsx
+// lib/auth.tsx (EXAMPLE)
 const getUser = async () => {
   const res = await fetch('/api/auth/me')  // Token via HttpOnly cookie
   if (!res.ok) return null
@@ -719,6 +755,7 @@ export const userQueryOptions = queryOptions({
 ### Authorization (RBAC/PBAC)
 
 ```typescript
+// lib/authorization.tsx (EXAMPLE)
 export function Authorization({ allowedRoles, policyCheck, children }: AuthorizationProps) {
   const { data: user } = useUser()
   if (!user) return null
@@ -735,6 +772,7 @@ export function Authorization({ allowedRoles, policyCheck, children }: Authoriza
 ### XSS Protection
 
 ```typescript
+// EXAMPLE
 import DOMPurify from 'dompurify'
 
 export function MDPreview({ content }: { content: string }) {
@@ -751,7 +789,7 @@ export function MDPreview({ content }: { content: string }) {
 **Tools**: Vitest, Testing Library, Playwright, MSW.
 
 ```typescript
-// features/settings/components/__tests__/account-list.test.tsx
+// features/settings/components/__tests__/account-list.test.tsx (EXAMPLE)
 test('deletes account on click', async () => {
   render(<AccountListContainer />)
   await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument())
