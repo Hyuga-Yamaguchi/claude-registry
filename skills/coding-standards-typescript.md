@@ -18,12 +18,15 @@ Language-level standards for TypeScript. Framework-specific patterns in frontend
 }
 ```
 
+**Note**: `noUncheckedIndexedAccess` treats array/dictionary access as `T | undefined`, improving null safety.
+
 ## Naming Conventions
 
 **Variables/Functions**: Descriptive names, verb-noun pattern for functions, `is`/`has`/`should`/`can` prefix for booleans.
 
 ```typescript
-const userCount = 42, isEnabled = true
+const userCount = 42
+const isEnabled = true
 function calculateTotal(items: Item[]): number { }
 function hasPermission(user: User): boolean { }
 ```
@@ -32,10 +35,23 @@ function hasPermission(user: User): boolean { }
 
 ```typescript
 const MAX_RETRIES = 3
+const TIMEOUT_MS = 5000
 const currentUser = getCurrentUser()  // Runtime value uses regular naming
 ```
 
 **Note**: JavaScript has no compile-time constants. UPPER_SNAKE_CASE is a convention for configuration.
+
+## Common Types
+
+### Result Pattern
+
+Use for operations with expected failures.
+
+```typescript
+type Result<T, E = Error> =
+  | { success: true; data: T }
+  | { success: false; error: E }
+```
 
 ## Type Safety
 
@@ -57,10 +73,6 @@ if (typeof data === 'object' && data !== null && 'id' in data) {
 ```typescript
 type Status = 'pending' | 'active' | 'archived'
 
-type Result<T, E = Error> =
-  | { success: true; data: T }
-  | { success: false; error: E }
-
 function processResult<T>(result: Result<T>): void {
   if (result.success) {
     console.log(result.data)  // TypeScript narrows type
@@ -72,7 +84,7 @@ function processResult<T>(result: Result<T>): void {
 
 ### Type Inference
 
-Leverage inference for simple cases. Add explicit types when they catch errors or improve clarity.
+Leverage inference for simple cases. Add explicit types when they validate behavior or improve clarity.
 
 ```typescript
 const count = 0  // Inferred: number
@@ -81,16 +93,23 @@ const config: Config = loadConfig()  // Validates return type
 
 ### `satisfies` Operator
 
-Validates types without widening them.
+Validates type conformance while preserving inferred type precision.
 
 ```typescript
+interface Config {
+  endpoint: string
+  timeout: number
+}
+
 const config = {
-  endpoint: '/api/data',
+  endpoint: 'data/source',
   timeout: 5000
 } satisfies Config
 
-config.endpoint  // Type: "/api/data" (literal, not string)
+config.endpoint  // Type typically remains "data/source" (not widened to string)
 ```
+
+**When to use**: Catch mismatches at assignment while retaining precise types for autocomplete and refinement.
 
 ### `as const` Assertions
 
@@ -99,87 +118,178 @@ Creates deeply readonly literal types.
 ```typescript
 const STATUSES = ['pending', 'active', 'archived'] as const
 type Status = typeof STATUSES[number]  // 'pending' | 'active' | 'archived'
-
-const ROUTES = { home: '/', profile: '/profile' } as const
 ```
 
 ### Optional (`?`) vs `| undefined`
 
-**Function parameters**: `?` for optional (can omit), `| undefined` when undefined is meaningful.
+**Type-level similarity, call-site difference**: Both permit `undefined` values, but `?` allows omission while `| undefined` requires explicit argument.
+
+**Function parameters**:
 
 ```typescript
-// Optional (can omit)
 function greet(name?: string): void {
   console.log(name ?? 'Guest')
 }
-greet()  // OK
-greet(undefined)  // OK
+greet()  // OK - argument omitted
+greet(undefined)  // OK - explicit undefined
 
-// Explicit undefined (must provide)
 function setConfig(value: Config | undefined): void {
-  // undefined means "clear config"
+  // undefined signals "clear config"
 }
 setConfig(undefined)  // OK
 setConfig()  // ❌ Error: Expected 1 argument
 ```
 
-**Object properties**: Prefer `?` for optional fields.
+**Object properties**:
 
 ```typescript
 interface User {
   id: string
   email?: string  // May or may not exist
+  metadata: Record<string, unknown> | undefined  // Must be present, can be undefined
+}
+
+const user1: User = { id: '1', metadata: undefined }  // OK - email omitted, metadata explicit
+const user2: User = { id: '2', metadata: { key: 'value' } }  // OK - metadata provided
+```
+
+**Key insight**: `?` signals "may be absent". `| undefined` signals "undefined is a meaningful value".
+
+## Imports and Modules
+
+### Use `import type` for Type-Only Imports
+
+Avoids emitting runtime code for type imports. Reduces accidental coupling and helps avoid circular import pitfalls.
+
+```typescript
+// ✅ Type-only import
+import type { User, Product } from './models'
+import { fetchUser } from './api'
+
+// ❌ Mixed import when only types are used
+import { User, Product } from './models'  // Runtime coupling
+```
+
+**Guideline**: Default to `import type` when importing only types. With `isolatedModules`, this ensures type imports are correctly erased during transpilation.
+
+## Immutability and `readonly`
+
+### Design with Immutability by Default
+
+Consider immutability during interface design. Favor `readonly` unless mutation is justified.
+
+```typescript
+// ✅ Immutable by design
+interface Config {
+  readonly endpoint: string
+  readonly timeout: number
+}
+
+function updateConfig(config: Readonly<Config>): Config {
+  return { ...config, timeout: 10000 }
+}
+
+// ✅ Function parameters
+function process(items: readonly Item[]): Item[] {
+  return [...items, newItem]
 }
 ```
 
-**Key difference**: `?` allows omission. `| undefined` requires explicit value.
-
-## Immutability
+**Guideline**: Start with `readonly` and remove only when mutation is necessary.
 
 ### Immutability Patterns
 
-Prefer immutable updates, but understand tradeoffs.
+Prefer immutable updates, but understand performance tradeoffs.
 
 ```typescript
 // Immutable update (shallow copy)
 const updated = { ...user, name: 'Alice' }
 const newItems = [...items, newItem]
 
-// Readonly prevents mutation
-function process(items: readonly Item[]): Item[] {
-  // items.push(x)  // ❌ Compile error
-  return [...items, newItem]
-}
-
 // ⚠️ Spread is shallow copy only
 const nested = { ...config }
-nested.api.timeout = 1000  // Mutates original!
+nested.database.timeout = 1000  // Mutates original!
 
 // Deep update needs nested spread
 const deepUpdate = {
   ...config,
-  api: { ...config.api, timeout: 1000 }
+  database: { ...config.database, timeout: 1000 }
 }
 
-// ⚠️ Performance tradeoff
+// ⚠️ Performance consideration
 const huge = new Array(100000).fill(0)
-const updated = [...huge, 1]  // Copies 100k items
+const copy = [...huge, 1]  // Copies 100k items
 
 // ✅ Deliberate mutation when justified
 function optimizedPush(items: Item[], item: Item): void {
-  items.push(item)  // Document why
+  items.push(item)  // Performance-critical path
 }
 ```
 
-### Array Operations
+## Union Types vs Enums
+
+### Prefer String Literal Unions
 
 ```typescript
-const filtered = items.filter(item => item.active)
-const mapped = items.map(item => ({ ...item, processed: true }))
-const sorted = [...items].sort((a, b) => a.value - b.value)  // Copy first
+type Status = 'pending' | 'active' | 'archived'
+
+function setStatus(status: Status): void { }
+setStatus('pending')
 ```
 
+### Use `enum` Sparingly
+
+Enums introduce runtime artifacts. Prefer unions unless you need:
+
+1. **Reverse mapping** (numeric enums only)
+2. **Namespace grouping** for exported constants
+
+```typescript
+enum HttpStatusCode {
+  OK = 200,
+  NotFound = 404,
+  ServerError = 500
+}
+
+function handleResponse(code: HttpStatusCode): void {
+  console.log(HttpStatusCode[code])  // Reverse mapping: "OK"
+}
+```
+
+**Guideline**: Default to string literal unions. Avoid `const enum` in libraries due to `isolatedModules` and transpiler compatibility issues.
+
 ## Error Handling
+
+### `throw` vs `Result` Pattern
+
+**`throw` for programming errors** (invariant violations, contract breaches):
+
+```typescript
+function divide(a: number, b: number): number {
+  if (b === 0) throw new Error('Division by zero')  // Contract violation
+  return a / b
+}
+```
+
+**`Result` for expected failures** (validation, parsing, external dependencies):
+
+```typescript
+function parseInput(input: string): Result<ParsedData> {
+  try {
+    const data = parse(input)
+    return isValid(data)
+      ? { success: true, data }
+      : { success: false, error: new Error('Validation failed') }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error('Parse failed')
+    }
+  }
+}
+```
+
+**Consistency rule**: Avoid mixing `throw` and `Result` within the same layer. Internal logic may use `throw`; module/API boundaries should convert to `Result`. This ensures uniform error handling contracts at each architectural level.
 
 ### Typed Error Handling
 
@@ -190,65 +300,37 @@ async function loadData(id: string): Promise<Data> {
   try {
     return await fetchFromSource(id)
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown'
-    throw new Error(`Failed to load ${id}: ${msg}`, { cause: error })
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    throw new Error(`Failed to load ${id}: ${message}`, { cause: error })
   }
-}
-```
-
-### Result Pattern
-
-Use for operations with expected failures.
-
-```typescript
-type Result<T, E = Error> =
-  | { success: true; data: T }
-  | { success: false; error: E }
-
-function parseInput(input: string): Result<ParsedData> {
-  try {
-    const data = parse(input)
-    return isValid(data)
-      ? { success: true, data }
-      : { success: false, error: new Error('Invalid') }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error : new Error('Parse failed') }
-  }
-}
-
-const result = parseInput(input)
-if (result.success) {
-  process(result.data)
-} else {
-  handleError(result.error)
 }
 ```
 
 ## Async/Await
 
-### Parallel vs Sequential
+### Parallel vs Sequential Execution
 
 ```typescript
-// Parallel
-const [users, products, stats] = await Promise.all([
-  fetchUsers(), fetchProducts(), fetchStats()
-])
+// Parallel execution
+const [users, products] = await Promise.all([fetchUsers(), fetchProducts()])
 
-// Partial failures
+// Handle partial failures
 const results = await Promise.allSettled([fetchUsers(), fetchProducts()])
-results.forEach((r, i) => {
-  if (r.status === 'fulfilled') {
-    process(r.value)
+results.forEach((result, index) => {
+  if (result.status === 'fulfilled') {
+    process(result.value)
   } else {
-    logError(`Op ${i} failed`, r.reason)
+    logError(`Operation ${index} failed`, result.reason)
   }
 })
 ```
 
+**Type note**: `Promise.all<[T1, T2]>` returns tuple types. `Promise.allSettled` returns `PromiseSettledResult<T>[]`. Use `Awaited<T>` to extract resolved type from Promise types.
+
 ### Async Initialization
 
 ```typescript
-// ✅ Static factory
+// ✅ Static factory method
 class DataLoader {
   private constructor(private data: Data) {}
 
@@ -258,10 +340,10 @@ class DataLoader {
   }
 }
 
-// ❌ Fire and forget
+// ❌ Async work in constructor
 class DataLoader {
   constructor(source: string) {
-    this.init(source)  // Race conditions
+    this.init(source)  // Fire-and-forget: no type safety for completion
   }
 }
 ```
@@ -270,7 +352,7 @@ class DataLoader {
 
 ### Small and Focused
 
-Keep <20 lines, single responsibility.
+Keep functions under 20 lines with single responsibility.
 
 ```typescript
 function validateEmail(email: string): boolean {
@@ -287,51 +369,47 @@ function validateUser(user: User): boolean {
 Max 3-4 parameters. Use objects for complex signatures.
 
 ```typescript
-interface CreateOptions {
+interface CreateUserOptions {
   name: string
   email: string
   role?: 'admin' | 'user'
 }
 
-function createUser(options: CreateOptions): User { }
-
-createUser({ name: 'Alice', email: 'alice@example.com' })
+function createUser(options: CreateUserOptions): User { }
 ```
 
 ### Early Returns
 
 ```typescript
-function processItem(item: Item | null): Result {
-  if (!item) return { error: 'No item' }
-  if (!item.isValid) return { error: 'Invalid' }
-  if (!hasPermission(item)) return { error: 'Forbidden' }
-  return { success: transform(item) }
+function processItem(item: Item | null): Result<ProcessedItem> {
+  if (!item) return { success: false, error: new Error('No item') }
+  if (!item.isValid) return { success: false, error: new Error('Invalid item') }
+  if (!hasPermission(item)) return { success: false, error: new Error('Forbidden') }
+  return { success: true, data: transform(item) }
 }
 ```
 
 ## Exhaustiveness Checking
 
-Use `never` to ensure all cases are handled.
+Use `never` to ensure all union cases are handled.
 
 ```typescript
 type Shape =
   | { kind: 'circle'; radius: number }
   | { kind: 'square'; size: number }
-  | { kind: 'rectangle'; width: number; height: number }
 
 function area(shape: Shape): number {
   switch (shape.kind) {
-    case 'circle': return Math.PI * shape.radius ** 2
-    case 'square': return shape.size ** 2
-    case 'rectangle': return shape.width * shape.height
+    case 'circle':
+      return Math.PI * shape.radius ** 2
+    case 'square':
+      return shape.size ** 2
     default:
-      const _exhaustive: never = shape  // Compile error if case missed
-      throw new Error(`Unhandled: ${_exhaustive}`)
+      const _exhaustive: never = shape
+      throw new Error(`Unhandled shape: ${_exhaustive}`)
   }
 }
 ```
-
-If you add a new shape type, TypeScript errors at the `never` assignment.
 
 ## Type Utilities
 
@@ -343,11 +421,12 @@ type ReadonlyUser = Readonly<User>
 type UserWithoutEmail = Omit<User, 'email'>
 type UserIdAndName = Pick<User, 'id' | 'name'>
 type UserKeys = keyof User
+type NonNullableValue = NonNullable<string | null>
 ```
 
 ### Type Aliases vs Branded Types
 
-**Type aliases** (readability, no runtime safety):
+**Type aliases** provide documentation but no runtime safety:
 
 ```typescript
 type UserId = string
@@ -356,38 +435,56 @@ type ProductId = string
 getUser(productId)  // ✅ TypeScript allows (same runtime type)
 ```
 
-**Branded types** (type-level safety):
+**Branded types** enforce type-level distinction:
 
 ```typescript
 type UserId = string & { readonly __brand: 'UserId' }
-type ProductId = string & { readonly __brand: 'ProductId' }
 
-function createUserId(id: string): UserId { return id as UserId }
+// ✅ Factory function (validation/normalization boundary)
+function createUserId(id: string): UserId {
+  if (!id.startsWith('user-')) throw new Error('Invalid user ID format')
+  return id as UserId
+}
+
 function getUser(id: UserId): User { }
 
 const userId = createUserId('user-123')
-const productId = 'prod-456' as ProductId
-getUser(productId)  // ❌ Type error
+getUser(userId)  // OK
+
+// ❌ Avoid direct casting at usage sites
+const productId = 'prod-456' as UserId  // Defeats type safety
 ```
 
-**Guideline**: Type aliases for documentation. Branded types when preventing mixing is critical.
+**Guideline**: Type aliases for documentation. Branded types when preventing mixing is critical. Factory functions serve as validation boundaries.
+
+### Avoid Over-Engineering Types
+
+```typescript
+// ⚠️ Complex mapped type (hard to debug)
+type DeepReadonly<T> = {
+  readonly [K in keyof T]: T[K] extends object ? DeepReadonly<T[K]> : T[K]
+}
+
+// ✅ Prefer simpler alternatives
+type UserReadonly = Readonly<User>
+```
+
+**Guideline**: Favor clarity over cleverness. Complex types require clear documentation.
 
 ## Null Safety
 
 ### Optional Chaining and Nullish Coalescing
 
 ```typescript
-// Optional chaining
 const city = user?.address?.city
 const firstItem = items?.[0]
 const result = callback?.(arg)
 
-// Nullish coalescing - Only null/undefined use default
-const timeout = config.timeout ?? 5000
-const count = userInput ?? 0
+// Nullish coalescing - Only null/undefined trigger default
+const requestTimeout = config.timeout ?? 5000
 
-// ❌ Avoid || for numbers - 0, '', false trigger default
-const timeout = config.timeout || 5000  // 0 becomes 5000!
+// ⚠️ Avoid || for numbers/booleans
+const fallbackTimeout = config.timeout || 5000  // 0 becomes 5000!
 ```
 
 ### Avoid Non-Null Assertion
@@ -399,14 +496,19 @@ function processUser(user: User | null): void {
   console.log(user.name)
 }
 
-// ❌ Non-null assertion
+// ❌ Non-null assertion bypasses type safety
 function processUser(user: User | null): void {
   console.log(user!.name)  // Runtime error if null
 }
 
-// ✅ ACCEPTABLE when you know it's safe
-const element = document.getElementById('root')!
+// ✅ Acceptable when invariant is guaranteed
+function initialize(config: Config | null): void {
+  if (!config) throw new Error('Config required')
+  useConfig(config!)  // Safe: already checked
+}
 ```
+
+**Guideline**: Avoid `!` unless you have explicit runtime guarantees immediately before usage.
 
 ## Code Quality
 
@@ -414,7 +516,7 @@ const element = document.getElementById('root')!
 
 ```typescript
 const MAX_RETRIES = 3
-const DEBOUNCE_MS = 500
+const TIMEOUT_MS = 500
 
 if (retryCount > MAX_RETRIES) { }
 ```
@@ -422,23 +524,25 @@ if (retryCount > MAX_RETRIES) { }
 ### Avoid Deep Nesting
 
 ```typescript
-function validateOrder(order: Order): ValidationResult {
-  if (!order) return { valid: false, reason: 'No order' }
-  if (order.items.length === 0) return { valid: false, reason: 'Empty' }
-  if (!order.customer) return { valid: false, reason: 'No customer' }
-  return { valid: true }
-}
-```
-
-### Extract Common Logic
-
-```typescript
-function formatNumber(value: number, decimals: number): string {
-  return value.toFixed(decimals)
+// ✅ Early returns
+function validateOrder(order: Order): Result<Order> {
+  if (!order) return { success: false, error: new Error('No order') }
+  if (order.items.length === 0) return { success: false, error: new Error('Empty') }
+  if (!order.customer) return { success: false, error: new Error('No customer') }
+  return { success: true, data: order }
 }
 
-const price = formatNumber(19.99, 2)
-const percentage = formatNumber(0.156, 1)
+// ❌ Nested conditions
+function validateOrder(order: Order): Result<Order> {
+  if (order) {
+    if (order.items.length > 0) {
+      if (order.customer) {
+        return { success: true, data: order }
+      }
+    }
+  }
+  return { success: false, error: new Error('Invalid') }
+}
 ```
 
 ## Comments and Documentation
@@ -447,29 +551,29 @@ const percentage = formatNumber(0.156, 1)
 
 ```typescript
 /**
- * Processes items using transformer.
+ * Processes items using provided transformer.
  *
  * @param items - Items to process
  * @param transform - Transformation function
  * @returns Transformed items
- * @throws {ValidationError} If invalid data
+ * @throws {ValidationError} If items contain invalid data
  */
-export function processItems<T, R>(items: T[], transform: (item: T) => R): R[] {
+export function processItems<T, R>(
+  items: T[],
+  transform: (item: T) => R
+): R[] {
   return items.map(transform)
 }
 ```
 
-### Comments Explain WHY
+### Comments Explain WHY, Not WHAT
 
 ```typescript
-// ✅ GOOD
+// ✅ Explains rationale
 // Binary search: array is pre-sorted with 10k+ items
 const index = binarySearch(items, target)
 
-// Deliberate mutation for 60fps requirement
-positions.push(newPosition)
-
-// ❌ BAD
+// ❌ States the obvious
 // Increment counter
 count++
 ```
@@ -477,13 +581,13 @@ count++
 ### Actionable TODOs
 
 ```typescript
-// ✅ GOOD
-// TODO(alice): Add caching before v2.0 (issue #123)
+// ✅ Context and ownership
+// TODO(alice): Add caching before v2.0 release (issue #123)
 
-// ❌ BAD
+// ❌ Vague
 // TODO: fix this
 ```
 
 ---
 
-**Remember**: Write code for humans first, machines second. TypeScript's type system is a tool for clarity and correctness, not an end in itself.
+**Principles**: Favor clarity over cleverness. Use TypeScript's type system to catch errors early, not to demonstrate advanced techniques. Write code that is easy to understand, modify, and delete.
