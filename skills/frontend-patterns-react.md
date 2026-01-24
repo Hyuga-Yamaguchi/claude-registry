@@ -841,36 +841,4 @@ export function Modal({ isOpen, onClose, children }: ModalProps) {
 
 ---
 
-## Reagent + Bulletproof Checklist
-
-### Reagent/Re-frame Principles
-- [ ] `useEffect` limited to UI-local concerns (DOM/focus/measurement)
-- [ ] Data fetching uses TanStack Query only
-- [ ] Error toasts via opt-in meta (status-based branching)
-- [ ] No toast calls in pages (display branching only)
-- [ ] No duplicate server state in local state
-- [ ] Using queryKey factory (no hardcoded strings)
-- [ ] Mutation success syncs via `invalidateQueries`
-- [ ] UI follows "subscribe → render → event" flow
-- [ ] Side effects aggregated at boundaries
-
-### Bulletproof Structure
-- [ ] Unidirectional dependency: shared → features → app
-- [ ] No cross-feature imports
-- [ ] Features export public API through index.ts
-- [ ] Server state in TanStack Query (not in Context/Reducer/Store)
-- [ ] Application state is minimal (small UI state only)
-- [ ] Event/Effect layer for cross-feature orchestration only
-- [ ] Navigation via command pattern (no global hook variables)
-
-### Technical Correctness
-- [ ] http wrapper handles 204, content-type, parse errors
-- [ ] ApiError includes status, code, details
-- [ ] No global variables for hook return values
-- [ ] QueryClient toast is opt-in via meta
-- [ ] 401/403/422 handled appropriately (not toasted)
-- [ ] app/subs for cross-feature derived data only
-
----
-
 **Remember**: Write working code first. Optimize after measuring. Add complexity only when needed. Use bulletproof structure for organization, re-frame principles for behavior.
