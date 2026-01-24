@@ -39,6 +39,18 @@ const currentUser = getCurrentUser()  // Runtime value uses regular naming
 
 **Note**: JavaScript has no compile-time constants. UPPER_SNAKE_CASE is a convention for configuration.
 
+## Common Types
+
+### Result Pattern
+
+Use for operations with expected failures.
+
+```typescript
+type Result<T, E = Error> =
+  | { success: true; data: T }
+  | { success: false; error: E }
+```
+
 ## Type Safety
 
 ### Avoid `any`, Use `unknown`
@@ -58,10 +70,6 @@ if (typeof data === 'object' && data !== null && 'id' in data) {
 
 ```typescript
 type Status = 'pending' | 'active' | 'archived'
-
-type Result<T, E = Error> =
-  | { success: true; data: T }
-  | { success: false; error: E }
 
 function processResult<T>(result: Result<T>): void {
   if (result.success) {
@@ -96,10 +104,10 @@ const config = {
   timeout: 5000
 } satisfies Config
 
-config.endpoint  // Type: "data/source" (literal preserved, not widened to string)
+config.endpoint  // Type typically remains "data/source" (not widened to string)
 ```
 
-**When to use**: Catch mismatches at assignment while retaining specific types for autocomplete and refinement.
+**When to use**: Catch mismatches at assignment while retaining precise types for autocomplete and refinement.
 
 ### `as const` Assertions
 
@@ -140,17 +148,17 @@ setConfig()  // ❌ Error: Expected 1 argument
 ```typescript
 interface User {
   id: string
-  email?: string  // May or may not exist
+  email?: string
 }
 ```
 
-**Key insight**: `?` signals "this parameter/property may be absent". `| undefined` signals "undefined is a meaningful value".
+**Key insight**: `?` signals "may be absent". `| undefined` signals "undefined is a meaningful value".
 
 ## Imports and Modules
 
 ### Use `import type` for Type-Only Imports
 
-Prevents circular dependency issues and clarifies intent.
+Eliminates runtime coupling and helps avoid module instantiation cycles.
 
 ```typescript
 // ✅ Type-only import
@@ -158,10 +166,10 @@ import type { User, Product } from './models'
 import { fetchUser } from './api'
 
 // ❌ Mixed import when only types are used
-import { User, Product } from './models'  // May cause circular deps
+import { User, Product } from './models'  // Runtime coupling
 ```
 
-**Guideline**: Default to `import type` when importing only types. This eliminates runtime coupling and avoids module instantiation cycles.
+**Guideline**: Default to `import type` when importing only types. This clarifies intent and reduces circular dependency risks.
 
 ## Immutability and `readonly`
 
@@ -210,11 +218,11 @@ const deepUpdate = {
 
 // ⚠️ Performance consideration
 const huge = new Array(100000).fill(0)
-const updated = [...huge, 1]  // Copies 100k items
+const copy = [...huge, 1]  // Copies 100k items
 
 // ✅ Deliberate mutation when justified (document rationale)
 function optimizedPush(items: Item[], item: Item): void {
-  items.push(item)  // Mutation acceptable here (explain why)
+  items.push(item)  // Performance-critical path
 }
 ```
 
@@ -235,7 +243,7 @@ const sorted = [...items].sort((a, b) => a.value - b.value)  // Copy before muta
 type Status = 'pending' | 'active' | 'archived'
 
 function setStatus(status: Status): void { }
-setStatus('pending')  // Clean call site
+setStatus('pending')
 ```
 
 ### Use `enum` Only When Necessary
@@ -264,11 +272,11 @@ function handleResponse(code: HttpStatusCode): void {
 
 ### `throw` vs `Result` Pattern
 
-**`throw` for programming errors** (bugs, invariant violations):
+**`throw` for programming errors** (invariant violations, contract breaches):
 
 ```typescript
 function divide(a: number, b: number): number {
-  if (b === 0) throw new Error('Division by zero')  // Programmer mistake
+  if (b === 0) throw new Error('Division by zero')  // Contract violation
   return a / b
 }
 ```
@@ -276,10 +284,6 @@ function divide(a: number, b: number): number {
 **`Result` for expected failures** (validation, parsing, external dependencies):
 
 ```typescript
-type Result<T, E = Error> =
-  | { success: true; data: T }
-  | { success: false; error: E }
-
 function parseInput(input: string): Result<ParsedData> {
   try {
     const data = parse(input)
@@ -321,7 +325,7 @@ async function loadData(id: string): Promise<Data> {
 
 ## Async/Await
 
-### Parallel vs Sequential
+### Parallel vs Sequential Execution
 
 ```typescript
 // Parallel execution
@@ -342,6 +346,8 @@ results.forEach((result, index) => {
 })
 ```
 
+**Type consideration**: `Promise.all` requires all to succeed. `Promise.allSettled` types each result as fulfilled or rejected.
+
 ### Async Initialization
 
 ```typescript
@@ -355,10 +361,10 @@ class DataLoader {
   }
 }
 
-// ❌ Async work in constructor (race conditions)
+// ❌ Async work in constructor
 class DataLoader {
   constructor(source: string) {
-    this.init(source)  // Fire-and-forget creates timing issues
+    this.init(source)  // Fire-and-forget: timing issues, no type safety for completion
   }
 }
 ```
@@ -398,11 +404,17 @@ createUser({ name: 'Alice', email: 'alice@example.com' })
 ### Early Returns
 
 ```typescript
-function processItem(item: Item | null): Result {
-  if (!item) return { error: 'No item' }
-  if (!item.isValid) return { error: 'Invalid' }
-  if (!hasPermission(item)) return { error: 'Forbidden' }
-  return { success: transform(item) }
+function processItem(item: Item | null): Result<ProcessedItem> {
+  if (!item) {
+    return { success: false, error: new Error('No item') }
+  }
+  if (!item.isValid) {
+    return { success: false, error: new Error('Invalid item') }
+  }
+  if (!hasPermission(item)) {
+    return { success: false, error: new Error('Forbidden') }
+  }
+  return { success: true, data: transform(item) }
 }
 ```
 
@@ -425,13 +437,13 @@ function area(shape: Shape): number {
     case 'rectangle':
       return shape.width * shape.height
     default:
-      const _exhaustive: never = shape  // Compile error if case missed
+      const _exhaustive: never = shape
       throw new Error(`Unhandled shape: ${_exhaustive}`)
   }
 }
 ```
 
-Adding a new shape variant causes a compile error at the `never` check, forcing you to handle it.
+Adding a new shape variant causes a compile error at the `never` check.
 
 ## Type Utilities
 
@@ -464,8 +476,9 @@ getUser(productId)  // ✅ TypeScript allows (same runtime type)
 type UserId = string & { readonly __brand: 'UserId' }
 type ProductId = string & { readonly __brand: 'ProductId' }
 
-// ✅ Use factory to avoid unchecked casts
+// ✅ Factory function (validation/normalization boundary)
 function createUserId(id: string): UserId {
+  if (!id.startsWith('user-')) throw new Error('Invalid user ID format')
   return id as UserId
 }
 
@@ -481,7 +494,7 @@ getUser(rawId)  // ❌ Type error
 const productId = 'prod-456' as ProductId  // Defeats type safety
 ```
 
-**Guideline**: Type aliases for documentation. Branded types when preventing mixing is critical (IDs, units, etc.). Always use factory functions for branded type creation.
+**Guideline**: Type aliases for documentation. Branded types when preventing mixing is critical (IDs, units, etc.). Factory functions serve as validation and normalization boundaries.
 
 ### Avoid Over-Engineering Types
 
@@ -493,11 +506,11 @@ type DeepReadonly<T> = {
   readonly [K in keyof T]: T[K] extends object ? DeepReadonly<T[K]> : T[K]
 }
 
-// ✅ Prefer simpler alternatives when possible
-type UserReadonly = Readonly<User>  // Sufficient for most cases
+// ✅ Prefer simpler alternatives
+type UserReadonly = Readonly<User>
 ```
 
-**Guideline**: Favor clarity over cleverness. Use advanced type features when they solve real problems, not for demonstration. Complex types should have clear documentation.
+**Guideline**: Favor clarity over cleverness. Use advanced type features when they solve real problems, not for demonstration. Complex types require clear documentation.
 
 ## Null Safety
 
@@ -513,7 +526,7 @@ const result = callback?.(arg)
 const timeout = config.timeout ?? 5000
 const count = userInput ?? 0
 
-// ⚠️ Avoid || for numbers/booleans - 0, '', false trigger default
+// ⚠️ Avoid || for numbers/booleans
 const timeout = config.timeout || 5000  // 0 becomes 5000!
 ```
 
@@ -550,30 +563,35 @@ const TIMEOUT_MS = 500
 const CACHE_SIZE = 100
 
 if (retryCount > MAX_RETRIES) { }
-setTimeout(callback, TIMEOUT_MS)
 ```
 
 ### Avoid Deep Nesting
 
 ```typescript
 // ✅ Early returns
-function validateOrder(order: Order): ValidationResult {
-  if (!order) return { valid: false, reason: 'No order' }
-  if (order.items.length === 0) return { valid: false, reason: 'Empty' }
-  if (!order.customer) return { valid: false, reason: 'No customer' }
-  return { valid: true }
+function validateOrder(order: Order): Result<Order> {
+  if (!order) {
+    return { success: false, error: new Error('No order') }
+  }
+  if (order.items.length === 0) {
+    return { success: false, error: new Error('Empty order') }
+  }
+  if (!order.customer) {
+    return { success: false, error: new Error('No customer') }
+  }
+  return { success: true, data: order }
 }
 
 // ❌ Nested conditions
-function validateOrder(order: Order): ValidationResult {
+function validateOrder(order: Order): Result<Order> {
   if (order) {
     if (order.items.length > 0) {
       if (order.customer) {
-        return { valid: true }
+        return { success: true, data: order }
       }
     }
   }
-  return { valid: false }
+  return { success: false, error: new Error('Invalid') }
 }
 ```
 
@@ -622,9 +640,6 @@ positions.push(newPosition)
 // ❌ States the obvious
 // Increment counter
 count++
-
-// Loop through items
-for (const item of items) { }
 ```
 
 ### Actionable TODOs
@@ -635,7 +650,6 @@ for (const item of items) { }
 
 // ❌ Vague
 // TODO: fix this
-// TODO: improve performance
 ```
 
 ---
