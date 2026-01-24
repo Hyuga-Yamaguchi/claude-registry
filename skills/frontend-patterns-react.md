@@ -785,11 +785,73 @@ export class ErrorBoundary extends React.Component<
 
 ## Performance
 
-**Don't overuse `useMemo/useCallback` unnecessarily.**
+**General Approach: Profile first, optimize second.**
 
-- Write working code first
-- Profile to find slow parts
-- Optimize only where needed
+1. Write working code first
+2. Profile to find slow parts (React DevTools Profiler, Chrome DevTools)
+3. Optimize only where needed
+
+### JavaScript Performance
+
+**Cache repeated function calls with module-level Map.**
+
+```typescript
+// Module-level cache (reusable across renders)
+const slugifyCache = new Map<string, string>()
+
+function cachedSlugify(text: string): string {
+  if (slugifyCache.has(text)) return slugifyCache.get(text)!
+  const result = slugify(text)
+  slugifyCache.set(text, result)
+  return result
+}
+
+function ProjectList({ projects }: { projects: Project[] }) {
+  return (
+    <div>
+      {projects.map(project => (
+        <ProjectCard key={project.id} slug={cachedSlugify(project.name)} />
+      ))}
+    </div>
+  )
+}
+```
+
+**Combine multiple array iterations into one loop.**
+
+```typescript
+// ❌ BAD: 3 iterations over users array
+const admins = users.filter(u => u.isAdmin)
+const testers = users.filter(u => u.isTester)
+const inactive = users.filter(u => !u.isActive)
+
+// ✅ GOOD: 1 iteration
+const admins: User[] = []
+const testers: User[] = []
+const inactive: User[] = []
+
+for (const user of users) {
+  if (user.isAdmin) admins.push(user)
+  if (user.isTester) testers.push(user)
+  if (!user.isActive) inactive.push(user)
+}
+```
+
+**Use Set/Map for O(1) lookups instead of Array.includes (O(n)).**
+
+```typescript
+// ❌ BAD: O(n) per check
+const allowedIds = ['a', 'b', 'c', ...]
+items.filter(item => allowedIds.includes(item.id))
+
+// ✅ GOOD: O(1) per check
+const allowedIds = new Set(['a', 'b', 'c', ...])
+items.filter(item => allowedIds.has(item.id))
+```
+
+### React Performance
+
+**Don't overuse `useMemo/useCallback` unnecessarily.**
 
 ```typescript
 // ❌ BAD: Unnecessary useMemo
@@ -805,6 +867,22 @@ const sorted = useMemo(
 )
 ```
 
+**Use lazy state initialization for expensive initial values.**
+
+```typescript
+// ❌ BAD: buildSearchIndex() runs on EVERY render
+const [searchIndex, setSearchIndex] = useState(buildSearchIndex(items))
+
+// ✅ GOOD: Runs ONLY on initial render
+const [searchIndex, setSearchIndex] = useState(() => buildSearchIndex(items))
+
+// ✅ GOOD: Lazy localStorage read
+const [settings, setSettings] = useState(() => {
+  const stored = localStorage.getItem('settings')
+  return stored ? JSON.parse(stored) : {}
+})
+```
+
 **Use `React.memo` for pure presenter components.**
 
 ```typescript
@@ -816,22 +894,50 @@ export const AccountCard = React.memo<{ account: Account }>(({ account }) => {
     </div>
   )
 })
+
+// For expensive work, extract to memoized component to enable early returns
+const UserAvatar = memo(function UserAvatar({ user }: { user: User }) {
+  const id = useMemo(() => computeAvatarId(user), [user])
+  return <Avatar id={id} />
+})
+
+function Profile({ user, loading }: Props) {
+  if (loading) return <Skeleton />  // Skip avatar computation when loading
+  return <div><UserAvatar user={user} /></div>
+}
 ```
 
-**TanStack Query cache settings:**
+### Rendering Optimization
+
+**Use explicit conditional rendering to avoid rendering falsy values.**
 
 ```typescript
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60,  // Fresh for 1 minute
-      gcTime: 1000 * 60 * 5,  // Keep cache for 5 minutes
-      refetchOnWindowFocus: true,
-      retry: 1,
-    },
-  },
-})
+// ❌ BAD: Renders "0" when count is 0
+{count && <span className="badge">{count}</span>}
+
+// ✅ GOOD: Renders nothing when count is 0
+{count > 0 ? <span className="badge">{count}</span> : null}
 ```
+
+**Hoist static JSX outside components to avoid re-creation.**
+
+```typescript
+// ❌ BAD: Recreates element every render
+function Container() {
+  return <div>{loading && <div className="animate-pulse h-20 bg-gray-200" />}</div>
+}
+
+// ✅ GOOD: Reuses same element reference
+const loadingSkeleton = <div className="animate-pulse h-20 bg-gray-200" />
+
+function Container() {
+  return <div>{loading && loadingSkeleton}</div>
+}
+```
+
+**Note:** If using [React Compiler](https://react.dev/learn/react-compiler), manual memoization (`memo`, `useMemo`, hoisting) is unnecessary. The compiler optimizes automatically.
+
+### Bundle Optimization
 
 **Code splitting for routes:**
 
@@ -851,6 +957,43 @@ function App() {
     </Suspense>
   )
 }
+```
+
+**Dynamic imports for heavy components (charts, editors, large libraries):**
+
+```typescript
+import { lazy, Suspense } from 'react'
+
+// ❌ BAD: Monaco bundles with main chunk (~300KB)
+import { MonacoEditor } from './monaco-editor'
+
+// ✅ GOOD: Monaco loads on demand
+const MonacoEditor = lazy(() => import('./monaco-editor').then(m => ({ default: m.MonacoEditor })))
+
+function CodePanel({ code }: { code: string }) {
+  return (
+    <Suspense fallback={<EditorSkeleton />}>
+      <MonacoEditor value={code} />
+    </Suspense>
+  )
+}
+```
+
+### Query Cache Settings
+
+**TanStack Query cache configuration:**
+
+```typescript
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60,  // Fresh for 1 minute
+      gcTime: 1000 * 60 * 5,  // Keep cache for 5 minutes
+      refetchOnWindowFocus: true,
+      retry: 1,
+    },
+  },
+})
 ```
 
 ---
