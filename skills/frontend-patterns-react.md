@@ -662,26 +662,6 @@ function ProjectList({ projects }: { projects: Project[] }) {
 
 **⚠️ Cache Size Management**: Module-level Maps grow unbounded. For user-generated inputs, add size limits (e.g., `if (cache.size > 1000) cache.clear()`) or use LRU cache libraries to prevent memory leaks.
 
-**Combine multiple array iterations into one loop.**
-
-```typescript
-// ❌ BAD: 3 iterations over users array
-const admins = users.filter(u => u.isAdmin)
-const testers = users.filter(u => u.isTester)
-const inactive = users.filter(u => !u.isActive)
-
-// ✅ GOOD: 1 iteration
-const admins: User[] = []
-const testers: User[] = []
-const inactive: User[] = []
-
-for (const user of users) {
-  if (user.isAdmin) admins.push(user)
-  if (user.isTester) testers.push(user)
-  if (!user.isActive) inactive.push(user)
-}
-```
-
 **Use Set/Map for O(1) lookups instead of Array.includes (O(n)).**
 
 ```typescript
