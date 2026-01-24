@@ -10,22 +10,16 @@ Language-level standards for Python 3.11+. Backend patterns in backend-patterns-
 ## Naming Conventions
 
 ```python
-from typing import TypedDict
-
 # Variables and functions: snake_case
 user_count = 42
 is_authenticated = True
 
-class LineItem(TypedDict):
-    price: float
-    quantity: int
-
-def calculate_total(items: list[LineItem]) -> float:
-    pass
+def calculate_total(items: list["LineItem"]) -> float:
+    ...
 
 # Classes: PascalCase
 class UserRepository:
-    pass
+    ...
 
 # Constants: UPPER_SNAKE_CASE
 MAX_RETRIES = 3
@@ -50,20 +44,20 @@ All public functions must have type annotations.
 from typing import Any
 
 def fetch_user(user_id: str) -> dict[str, Any]:
-    pass
+    ...
 
 def process_items(items: list[str]) -> list[int]:
-    pass
+    ...
 ```
 
 ### Prefer Modern Syntax (Python 3.10+)
 
 ```python
 def process_data(data: dict[str, int]) -> list[str]:
-    pass
+    ...
 
 def get_user(user_id: str) -> User | None:
-    pass
+    ...
 ```
 
 ### Prefer Structured Types
@@ -130,7 +124,7 @@ from typing import Literal
 Status = Literal["active", "inactive", "archived"]
 
 def set_status(status: Status) -> None:
-    pass
+    ...
 ```
 
 ## Error Handling
@@ -144,15 +138,15 @@ Domain exceptions must inherit from `Exception`, not `BaseException`.
 ```python
 class ApplicationError(Exception):
     """Base for all application errors."""
-    pass
+    ...
 
 class ValidationError(ApplicationError):
     """Validation failure."""
-    pass
+    ...
 
 class MaxRetriesExceeded(ApplicationError):
     """Maximum retry attempts exceeded."""
-    pass
+    ...
 ```
 
 ### Never Silence Exceptions
@@ -227,7 +221,7 @@ def parse_config(data: str) -> Success[dict[str, object]] | Failure[str]:
 
 def use_config(config: dict[str, object]) -> None:
     """Process validated configuration."""
-    pass
+    ...
 
 config_string = '{"key": "value"}'
 result = parse_config(config_string)
@@ -278,11 +272,11 @@ class Status(Enum):
 def update_status(order: Order, status: Status) -> None:
     match status:
         case Status.PENDING:
-            pass
+            ...
         case Status.CONFIRMED:
-            pass
+            ...
         case Status.SHIPPED:
-            pass
+            ...
 ```
 
 ### Prefer Immutable Data
@@ -344,7 +338,7 @@ def calculate_total(items: list[LineItem]) -> float:
 def validate_email(email: str) -> bool:
     """Basic email validation. Not RFC-compliant."""
     local, sep, domain = email.partition("@")
-    return bool(local and sep and domain and "." in domain)
+    return bool(local) and sep == "@" and bool(domain) and "." in domain
 ```
 
 ### Keyword-Only Arguments
@@ -357,7 +351,7 @@ def create_user(
     role: str = "user",
     send_welcome: bool = False,
 ) -> User:
-    pass
+    ...
 
 create_user("Alice", "alice@example.com", role="admin", send_welcome=True)
 ```
@@ -391,7 +385,7 @@ def search_items(query: str, limit: int = 10) -> list[dict[str, object]]:
     Raises:
         ValueError: If query is empty
     """
-    pass
+    ...
 ```
 
 ### Comments Explain WHY
