@@ -298,7 +298,7 @@ export class ApiError extends Error {
 
 ### HTTP Wrapper (Type-safe + FormData support)
 
-**httpJson Contract**: Endpoints using `httpJson` MUST return JSON (including 200 responses). For 204 No Content, use explicit status handling. For non-JSON responses, use `httpText()` or raw `fetch()`.
+**httpJson Contract**: Endpoints using `httpJson` MUST return `Content-Type: application/json` (except 204 No Content). Contract violations throw `ApiError` with `INVALID_CONTENT_TYPE` for early detection. For non-JSON responses, use `httpText()` or raw `fetch()`.
 
 **Usage**: `httpJson` is for JSON request/response only. For FormData/Blob/URLSearchParams, use `fetch()` directly (FormData sets its own Content-Type with boundary).
 
@@ -337,12 +337,31 @@ export async function httpJson<T>(
 
   if (res.status === 204) return undefined as T
 
+  // Validate Content-Type for successful responses (contract enforcement)
+  const contentType = res.headers.get('content-type')
+  if (!contentType?.includes('application/json')) {
+    throw new ApiError(
+      'Expected JSON response',
+      res.status,
+      'INVALID_CONTENT_TYPE',
+      { contentType }
+    )
+  }
+
   return res.json()
 }
 
 export async function httpText(url: string, options?: RequestInit): Promise<string> {
   const res = await fetch(url, options)
-  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '')
+    throw new ApiError(
+      `HTTP ${res.status}`,
+      res.status,
+      undefined,
+      { bodyText: bodyText.slice(0, 500) }  // Limit to 500 chars to avoid large logs
+    )
+  }
   return res.text()
 }
 ```
@@ -381,6 +400,7 @@ export const settingsKeys = {
   all: ['settings'] as const,
   accounts: () => [...settingsKeys.all, 'accounts'] as const,
   accountDetail: (id: string) => [...settingsKeys.accounts(), id] as const,
+  departments: () => [...settingsKeys.all, 'departments'] as const,
 }
 ```
 
