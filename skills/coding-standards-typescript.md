@@ -96,6 +96,11 @@ const config: Config = loadConfig()  // Validates return type
 Validates type conformance while preserving inferred type precision.
 
 ```typescript
+interface Config {
+  endpoint: string
+  timeout: number
+}
+
 const config = {
   endpoint: 'data/source',
   timeout: 5000
@@ -119,12 +124,14 @@ type Status = typeof STATUSES[number]  // 'pending' | 'active' | 'archived'
 
 **Type-level similarity, call-site difference**: Both permit `undefined` values, but `?` allows omission while `| undefined` requires explicit argument.
 
+**Function parameters**:
+
 ```typescript
 function greet(name?: string): void {
   console.log(name ?? 'Guest')
 }
-greet()  // OK
-greet(undefined)  // OK
+greet()  // OK - argument omitted
+greet(undefined)  // OK - explicit undefined
 
 function setConfig(value: Config | undefined): void {
   // undefined signals "clear config"
@@ -133,13 +140,26 @@ setConfig(undefined)  // OK
 setConfig()  // ❌ Error: Expected 1 argument
 ```
 
+**Object properties**:
+
+```typescript
+interface User {
+  id: string
+  email?: string  // May or may not exist
+  metadata: Record<string, unknown> | undefined  // Must be present, can be undefined
+}
+
+const user1: User = { id: '1' }  // OK - email omitted
+const user2: User = { id: '2', metadata: undefined }  // OK - metadata explicit
+```
+
 **Key insight**: `?` signals "may be absent". `| undefined` signals "undefined is a meaningful value".
 
 ## Imports and Modules
 
 ### Use `import type` for Type-Only Imports
 
-Avoids emitting runtime imports for types. Reduces accidental runtime coupling and helps avoid circular import pitfalls.
+Avoids emitting runtime code for type imports. Reduces accidental coupling and helps prevent circular dependency issues at runtime.
 
 ```typescript
 // ✅ Type-only import
@@ -150,7 +170,7 @@ import { fetchUser } from './api'
 import { User, Product } from './models'  // Runtime coupling
 ```
 
-**Guideline**: Default to `import type` when importing only types.
+**Guideline**: Default to `import type` when importing only types. With `isolatedModules`, this ensures type imports are correctly erased during transpilation.
 
 ## Immutability and `readonly`
 
@@ -269,7 +289,7 @@ function parseInput(input: string): Result<ParsedData> {
 }
 ```
 
-**Consistency rule**: Avoid mixing `throw` and `Result` within the same layer. Internal logic may use `throw`; external boundaries should convert to `Result`.
+**Consistency rule**: Avoid mixing `throw` and `Result` within the same layer. Internal logic may use `throw`; module/API boundaries should convert to `Result`. This ensures uniform error handling contracts at each architectural level.
 
 ### Typed Error Handling
 
@@ -305,7 +325,7 @@ results.forEach((result, index) => {
 })
 ```
 
-**Type note**: `Promise.all<[T1, T2]>` returns tuple types. `Promise.allSettled` returns `PromiseSettledResult<T>[]`.
+**Type note**: `Promise.all<[T1, T2]>` returns tuple types. `Promise.allSettled` returns `PromiseSettledResult<T>[]`. Use `Awaited<T>` to extract resolved type from Promise types.
 
 ### Async Initialization
 
@@ -461,10 +481,10 @@ const firstItem = items?.[0]
 const result = callback?.(arg)
 
 // Nullish coalescing - Only null/undefined trigger default
-const timeout = config.timeout ?? 5000
+const requestTimeout = config.timeout ?? 5000
 
 // ⚠️ Avoid || for numbers/booleans
-const timeout = config.timeout || 5000  // 0 becomes 5000!
+const fallbackTimeout = config.timeout || 5000  // 0 becomes 5000!
 ```
 
 ### Avoid Non-Null Assertion
