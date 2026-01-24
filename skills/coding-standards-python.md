@@ -1,11 +1,11 @@
 ---
 name: coding-standards-python
-description: Python language-level coding standards and best practices for Python 3.11+. Formatting handled by Black/Ruff.
+description: Python language-level coding standards and best practices for Python 3.11+. Formatting handled by Ruff.
 ---
 
 # Python Coding Standards
 
-Language-level standards for Python 3.11+. Project-specific backend patterns in backend-patterns-fastapi.md. Formatting handled by Black or Ruff formatter.
+Language-level standards for Python 3.11+. Project-specific backend patterns in backend-patterns-fastapi.md. Formatting handled by Ruff formatter.
 
 ## Naming Conventions
 
@@ -19,9 +19,6 @@ is_authenticated = True
 
 def calculate_total(items: list[dict]) -> float:
     pass
-
-def fetch_user_data(user_id: str) -> dict:
-    pass
 ```
 
 ### Classes
@@ -30,9 +27,6 @@ Use `PascalCase` for class names.
 
 ```python
 class UserRepository:
-    pass
-
-class OrderProcessor:
     pass
 ```
 
@@ -59,22 +53,6 @@ class User:
         return len(self._name) > 0
 ```
 
-### Single Character Names
-
-Acceptable for loop counters, lambda parameters, mathematical operations. Avoid for other cases.
-
-```python
-# Acceptable
-for i, item in enumerate(items):
-    pass
-
-result = map(lambda x: x * 2, numbers)
-
-# Avoid
-n = fetch_count()  # Use: count = fetch_count()
-d = get_data()     # Use: data = get_data()
-```
-
 ## Type Hints
 
 ### Use Type Hints for Public APIs
@@ -94,23 +72,16 @@ def process_items(items: list[str]) -> list[int]:
 ### Prefer Modern Syntax (Python 3.10+)
 
 ```python
-# Use built-in generics
 def process_data(data: dict[str, int]) -> list[str]:
     pass
 
 def get_user(user_id: str) -> User | None:
     pass
-
-# Avoid legacy typing module aliases
-from typing import Dict, List, Optional
-
-def process_data_old(data: Dict[str, int]) -> List[str]:
-    pass
 ```
 
 ### Prefer Structured Types
 
-Use TypedDict or dataclasses instead of generic `dict` or `list[dict]`.
+Use TypedDict or dataclasses instead of generic `dict`.
 
 **TypedDict**: For static type checking of dictionary structures. Not a runtime validator.
 
@@ -122,17 +93,13 @@ class UserPayload(TypedDict):
     name: str
     email: str
 
-# Correct: dictionary literal with type annotation
 def parse_response(data: dict) -> UserPayload:
     payload: UserPayload = {
         "id": data["id"],
         "name": data["name"],
-        "email": data["email"]
+        "email": data["email"],
     }
     return payload
-
-# TypedDict is not a constructor
-# payload = UserPayload(...)  # Wrong
 ```
 
 **Dataclass**: For domain models with behavior.
@@ -165,7 +132,7 @@ def parse_external_api(response: dict[str, Any]) -> User:
     return User(
         id=str(response["id"]),
         name=str(response["name"]),
-        email=str(response["email"])
+        email=str(response["email"]),
     )
 ```
 
@@ -186,23 +153,15 @@ def set_status(status: Status) -> None:
 
 Domain exceptions must inherit from `Exception`, not `BaseException`.
 
-**Rationale**: `BaseException` is reserved for system-level exceptions (KeyboardInterrupt, SystemExit). User exceptions should inherit from `Exception`.
+**Rationale**: `BaseException` is reserved for system-level exceptions (KeyboardInterrupt, SystemExit).
 
 ```python
 class ApplicationError(Exception):
     """Base for all application errors."""
     pass
 
-class DomainError(ApplicationError):
-    """Base for domain logic errors."""
-    pass
-
-class ValidationError(DomainError):
+class ValidationError(ApplicationError):
     """Validation failure."""
-    pass
-
-class ResourceNotFoundError(DomainError):
-    """Resource not found."""
     pass
 ```
 
@@ -213,13 +172,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Never
-try:
-    risky_operation()
-except Exception:
-    pass  # Silent failure
-
-# Always log or re-raise
 try:
     risky_operation()
 except ValueError:
@@ -244,20 +196,13 @@ def parse_config(config_str: str) -> dict:
         raise ValueError("Invalid config format") from e
 ```
 
-### Use Context Managers
+### Result Pattern
 
-```python
-with open("file.txt") as f:
-    data = f.read()
-```
-
-### Result Pattern (Optional)
-
-For expected domain errors, consider Result pattern. Use when explicit error handling improves clarity.
+For expected domain errors, use Result pattern for explicit error handling.
 
 ```python
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Generic, TypeAlias, TypeVar
 
 T = TypeVar("T")
 E = TypeVar("E")
@@ -270,17 +215,17 @@ class Success(Generic[T]):
 class Failure(Generic[E]):
     error: E
 
-type Result[T, E] = Success[T] | Failure[E]
+Result: TypeAlias = Success[T] | Failure[E]
 
-# Use for expected failures
-def parse_input(data: str) -> Result[dict, str]:
+def parse_input(data: str) -> Success[dict] | Failure[str]:
+    import json
+
     try:
         parsed = json.loads(data)
         return Success(parsed)
     except json.JSONDecodeError:
         return Failure("Invalid JSON")
 
-# Pattern matching
 result = parse_input(input_string)
 match result:
     case Success(value):
@@ -334,13 +279,11 @@ def update_status(order: Order, status: Status) -> None:
 ```python
 from dataclasses import dataclass
 
-# Immutable by default
 @dataclass(frozen=True)
 class Point:
     x: float
     y: float
 
-# Mutable only when necessary
 @dataclass
 class Counter:
     count: int = 0
@@ -351,26 +294,12 @@ class Counter:
 
 ## Pythonic Idioms
 
-### Comprehensions for Simple Cases
+### Comprehensions
 
 ```python
-squares = [x ** 2 for x in range(10)]
-even_squares = [x ** 2 for x in range(10) if x % 2 == 0]
+squares = [x**2 for x in range(10)]
+even_squares = [x**2 for x in range(10) if x % 2 == 0]
 user_map = {user.id: user.name for user in users}
-```
-
-### Don't Nest Comprehensions Deeply
-
-```python
-# Readable
-matrix = [[1, 2, 3], [4, 5, 6]]
-flat = [item for row in matrix for item in row]
-
-# Too complex - use loops
-result = []
-for row in matrix:
-    if sum(row) > 5:
-        result.append([x * y for x in row if x > 0])
 ```
 
 ### Generators for Large Data
@@ -382,19 +311,9 @@ def read_large_file(path: str) -> Iterator[str]:
     with open(path) as f:
         for line in f:
             yield line.strip()
-
-for line in read_large_file("data.txt"):
-    process(line)
 ```
 
-### Tuple Unpacking
-
-```python
-x, y = (1, 2)
-first, *rest = [1, 2, 3, 4]
-```
-
-### Use `enumerate` and `zip`
+### Built-in Functions
 
 ```python
 for index, item in enumerate(items):
@@ -402,20 +321,48 @@ for index, item in enumerate(items):
 
 for name, age in zip(names, ages):
     print(f"{name} is {age}")
-```
 
-### Use `dict.get()` with Default
-
-```python
 name = user.get("name", "Anonymous")
-count = data.get("count", 0)
-```
-
-### Use `any()` and `all()`
-
-```python
 has_admin = any(user.role == "admin" for user in users)
 all_active = all(user.active for user in users)
+```
+
+## Functions
+
+### Single Responsibility
+
+```python
+def calculate_total(items: list[dict]) -> float:
+    return sum(item["price"] * item["quantity"] for item in items)
+
+def validate_email(email: str) -> bool:
+    return "@" in email and "." in email.split("@")[1]
+```
+
+### Keyword-Only Arguments
+
+```python
+def create_user(
+    name: str,
+    email: str,
+    *,
+    role: str = "user",
+    send_welcome: bool = False,
+) -> User:
+    pass
+
+create_user("Alice", "alice@example.com", role="admin", send_welcome=True)
+```
+
+### Early Returns
+
+```python
+def process_order(order: Order | None) -> Success[Order] | Failure[str]:
+    if order is None:
+        return Failure("Order not found")
+    if not order.items:
+        return Failure("No items")
+    return Success(complete_order(order))
 ```
 
 ## Documentation
@@ -441,19 +388,14 @@ def search_items(query: str, limit: int = 10) -> list[dict]:
     pass
 ```
 
-### Comments Explain WHY, Not WHAT
+### Comments Explain WHY
 
 ```python
-# Explains reasoning
 # Exponential backoff prevents API overload during outages
-delay = min(30, 2 ** retry_count)
-
-# Avoid stating obvious
-# Increment counter
-counter += 1
+delay = min(30, 2**retry_count)
 ```
 
-## Code Smells
+## Code Quality
 
 ### Avoid Magic Numbers
 
@@ -468,7 +410,7 @@ if retry_count > MAX_RETRIES:
 ### Avoid Deep Nesting
 
 ```python
-def process_data(data: dict | None) -> Result[dict, str]:
+def process_data(data: dict | None) -> Success[dict] | Failure[str]:
     if data is None:
         return Failure("No data")
     if not data.get("is_valid"):
@@ -476,59 +418,6 @@ def process_data(data: dict | None) -> Result[dict, str]:
     if not has_permission(data):
         return Failure("Forbidden")
     return Success(transform(data))
-```
-
-### Avoid Code Duplication
-
-```python
-def format_price(amount: float, currency: str = "USD") -> str:
-    return f"{currency} {amount:.2f}"
-
-price_usd = format_price(100.0)
-price_eur = format_price(100.0, "EUR")
-```
-
-## Functions
-
-### Single Responsibility
-
-```python
-def calculate_total(items: list[dict]) -> float:
-    return sum(item["price"] * item["quantity"] for item in items)
-
-def validate_email(email: str) -> bool:
-    return "@" in email and "." in email.split("@")[1]
-```
-
-### Keyword-Only Arguments
-
-```python
-def create_user(
-    name: str,
-    email: str,
-    *,
-    role: str = "user",
-    send_welcome: bool = False
-) -> User:
-    pass
-
-create_user(
-    "Alice",
-    "alice@example.com",
-    role="admin",
-    send_welcome=True
-)
-```
-
-### Early Returns
-
-```python
-def process_order(order: Order | None) -> Result[Order, str]:
-    if order is None:
-        return Failure("Order not found")
-    if not order.items:
-        return Failure("No items")
-    return Success(complete_order(order))
 ```
 
 ---
@@ -540,8 +429,7 @@ def process_order(order: Order | None) -> Result[Order, str]:
 ### Required Tools
 
 - Python 3.11+
-- Ruff for linting
-- Black or Ruff formatter for formatting
+- Ruff for linting and formatting
 - pyright for type checking
 
 ### Type Checking Configuration
@@ -562,7 +450,7 @@ Avoid common mistakes:
 
 CI must enforce:
 - Ruff linting (zero errors)
-- Formatting check (Black or Ruff)
+- Ruff formatting check
 - pyright strict mode
 - No implicit `Any` in public APIs
 
@@ -598,8 +486,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Never
-logger.info(f"User: {user.email}")  # PII
-logger.debug(f"API key: {api_key}")  # Secret
+logger.info(f"User: {user.email}")
+logger.debug(f"API key: {api_key}")
 
 # Log events without sensitive data
 logger.info("User logged in", extra={"user_id": user.id})
@@ -607,24 +495,17 @@ logger.info("User logged in", extra={"user_id": user.id})
 
 ### Prefer Structured Logging
 
-Use `extra` for structured data. Avoid eager evaluation.
+Use `extra` for structured data.
 
 ```python
-# Prefer structured logging
 logger.info(
     "Order created",
     extra={
         "order_id": order.id,
         "user_id": order.user_id,
-        "total": str(order.total)
-    }
+        "total": str(order.total),
+    },
 )
-
-# Acceptable with lazy formatting
-logger.info("Order %s created for user %s", order.id, order.user_id)
-
-# Avoid f-strings (eager evaluation)
-logger.info(f"Order {order.id} created")  # Acceptable but not preferred
 ```
 
 ### Use logger.exception() for Unexpected Errors
@@ -648,11 +529,8 @@ Use parameterized queries. Parameter style varies by driver.
 ```python
 import sqlite3
 
-def get_user(user_id: str, conn: sqlite3.Connection) -> dict | None:
-    cursor = conn.execute(
-        "SELECT * FROM users WHERE id = ?",
-        (user_id,)
-    )
+def get_user(user_id: str, conn: sqlite3.Connection) -> tuple | None:
+    cursor = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
     return cursor.fetchone()
 ```
 
@@ -661,18 +539,14 @@ def get_user(user_id: str, conn: sqlite3.Connection) -> dict | None:
 ```python
 import psycopg
 
-def get_user(user_id: str, conn: psycopg.Connection) -> dict | None:
-    cursor = conn.execute(
-        "SELECT * FROM users WHERE id = %s",
-        (user_id,)
-    )
+def get_user(user_id: str, conn: psycopg.Connection) -> tuple | None:
+    cursor = conn.execute("SELECT * FROM users WHERE id = %s", (user_id,))
     return cursor.fetchone()
 ```
 
 **Never**:
 
 ```python
-# SQL injection vulnerability
 query = f"SELECT * FROM users WHERE id = '{user_id}'"
 ```
 
@@ -681,30 +555,14 @@ query = f"SELECT * FROM users WHERE id = '{user_id}'"
 ```python
 import subprocess
 
-# Correct
-subprocess.run(
-    ["ls", "-l", filename],
-    capture_output=True,
-    check=True
-)
-
-# Never - command injection
-subprocess.run(
-    f"ls -l {filename}",
-    shell=True  # Dangerous
-)
+subprocess.run(["ls", "-l", filename], capture_output=True, check=True)
 ```
 
 ### Do Not Deserialize Untrusted Pickle
 
 ```python
-import pickle
 import json
 
-# Never - code execution vulnerability
-data = pickle.loads(untrusted_bytes)
-
-# Use JSON for untrusted data
 data = json.loads(untrusted_string)
 ```
 
@@ -715,9 +573,6 @@ import os
 
 API_KEY = os.environ["API_KEY"]
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-# Never hardcode
-API_KEY = "sk-1234..."  # Exposed in git
 ```
 
 ## Testing
@@ -735,11 +590,10 @@ def test_calculate_discount():
 
 ### Tests Must Be Deterministic
 
-No dependency on current time, random values, or external state.
-
 ```python
-from freezegun import freeze_time
 from datetime import datetime
+
+from freezegun import freeze_time
 
 @freeze_time("2024-01-01 12:00:00")
 def test_order_timestamp():
@@ -750,17 +604,15 @@ def test_order_timestamp():
 ### Mock External I/O
 
 ```python
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 @patch("myapp.services.send_email")
-def test_registration_sends_email(mock_send: Mock):
+def test_registration_sends_email(mock_send):
     register_user(email="user@example.com")
     mock_send.assert_called_once()
 ```
 
 ### No Network in Unit Tests
-
-Unit tests must not make network calls. Use integration test markers.
 
 ```python
 @pytest.mark.integration
