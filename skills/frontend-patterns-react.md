@@ -31,6 +31,46 @@ For language-level TypeScript standards, see [coding-standards-typescript.md](co
 
 ---
 
+## Tech Stack
+
+### Core
+
+- **[React](https://react.dev)** (18+): UI library
+- **[TypeScript](https://www.typescriptlang.org/)**: Type safety (required)
+- **[react-router-dom](https://reactrouter.com/)**: Client-side routing
+
+### State Management
+
+- **[TanStack Query](https://tanstack.com/query)** (v5): Server state (required)
+- **[zustand](https://github.com/pmndrs/zustand)** or **[jotai](https://jotai.org/)**: Application state (minimal, UI-only)
+
+### Forms & Validation
+
+- **[react-hook-form](https://react-hook-form.com/)**: Form state management
+- **[zod](https://github.com/colinhacks/zod)**: Schema validation
+
+### UI & Styling
+
+- **[Tailwind CSS](https://tailwindcss.com/)** or **CSS Modules**: Styling
+- **[sonner](https://sonner.emilkowal.ski/)**: Toast notifications
+- **[DOMPurify](https://github.com/cure53/DOMPurify)**: XSS sanitization
+
+### Testing
+
+- **[Vitest](https://vitest.dev)**: Test runner
+- **[Testing Library](https://testing-library.com/)**: Component testing
+- **[Playwright](https://playwright.dev)**: E2E testing
+- **[MSW](https://mswjs.io)**: API mocking
+
+### Development Tools
+
+- **[Vite](https://vitejs.dev/)**: Build tool
+- **[ESLint](https://eslint.org/)**: Linting
+- **[Prettier](https://prettier.io/)**: Code formatting
+- **[Husky](https://typicode.github.io/husky/)**: Git hooks
+
+---
+
 ## Directory Structure
 
 ```
@@ -948,34 +988,9 @@ export function MDPreview({ content }: { content: string }) {
 
 ## Project Standards
 
-### Tooling
-
-- **ESLint**: Code quality, **Prettier**: Auto-format, **TypeScript**: Type safety (required), **Husky**: Pre-commit hooks
-
-### Absolute Imports
-
-**Configure `@/*` path alias.**
-
-```json
-// tsconfig.json
-{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } } }
-```
-
-```typescript
-// ✅ GOOD
-import { Card } from '@/components/ui/card'
-
-// ❌ BAD
-import { Card } from '../../../components/ui/card'
-```
-
-### File Naming
-
-**Use kebab-case. Enforce with ESLint `check-file` plugin.**
-
-```
-user-settings/components/account-list.tsx
-```
+- **ESLint + Prettier + TypeScript + Husky**: Code quality, formatting, type safety, pre-commit hooks
+- **Absolute Imports**: Configure `@/*` in `tsconfig.json` (`import { Card } from '@/components/ui/card'`)
+- **File Naming**: kebab-case (`account-list.tsx`), enforce with ESLint `check-file` plugin
 
 ---
 
