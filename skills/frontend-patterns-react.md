@@ -1,13 +1,98 @@
 ---
 name: frontend-patterns-react
-description: Reagent-inspired React/Next.js patterns - subscription-driven UI, event/effect separation, side-effects at the edges, with TanStack Query as standard.
+description: Reagent-inspired React/Next.js patterns with bulletproof-react structure - subscription-driven UI, event/effect separation, side-effects at the edges, with TanStack Query as standard.
 ---
 
-# React Frontend Patterns (Reagent-inspired)
+# React Frontend Patterns (Reagent-inspired + Bulletproof Structure)
 
-Design guide applying Reagent/Re-frame philosophy (subscription model, event-driven, side-effect separation) to React/Next.js.
+Design guide applying Reagent/Re-frame philosophy (subscription model, event-driven, side-effect separation) to React/Next.js, using [bulletproof-react](https://github.com/alan2207/bulletproof-react) as the structural foundation.
 
 For language-level TypeScript standards, see [coding-standards-typescript.md](coding-standards-typescript.md).
+
+---
+
+## Philosophy: Bulletproof + Re-frame Layer
+
+**bulletproof-react** provides the "structural foundation" (directory structure, boundaries, tool selection), while **Reagent/Re-frame** principles enforce the "behavioral rules" (pure views, event-driven, effect isolation).
+
+**What bulletproof-react provides:**
+- Features-based organization (domain-driven boundaries)
+- Unidirectional codebase (shared → features → app)
+- State classification (Component / Application / Server Cache / Form / URL)
+- Server Cache with TanStack Query (standard)
+- Cross-feature import prohibition
+
+**What we add (Re-frame layer):**
+- Pure View: Subscribe & Render only (no side effects in UI)
+- Event-driven: All changes through events (dispatch only)
+- Effect handlers: Side effects isolated at boundaries (events/, effects/)
+- Subscriptions: Derived data via selectors (subs/)
+
+**Result:** bulletproof-react's structure + re-frame's discipline = scalable, maintainable React architecture.
+
+---
+
+## Directory Structure
+
+Based on bulletproof-react with re-frame layer:
+
+```
+src/
+├── app/                    # Application layer (composition + re-frame core)
+│   ├── routes/             # Route definitions
+│   ├── events/             # Event handlers (re-frame style)
+│   ├── effects/            # Effect implementations (API, toast, navigation, logging)
+│   ├── subs/               # Selectors / subscriptions (derived data)
+│   ├── store/              # Application state (zustand/jotai)
+│   └── provider.tsx        # Root providers (QueryClient, Router, etc)
+│
+├── features/               # Feature modules (domain-driven, isolated)
+│   ├── auth/
+│   │   ├── api/            # API calls for this feature
+│   │   ├── components/     # Feature-specific components
+│   │   ├── hooks/          # Feature-specific hooks (queries, mutations)
+│   │   ├── types/          # Feature-specific types
+│   │   └── index.ts        # Public API (controlled exports)
+│   │
+│   ├── settings/
+│   │   ├── api/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   │   ├── queries/    # useAccounts, useDepartments, etc
+│   │   │   ├── mutations/  # useAddDepartment, useUpdateAccount, etc
+│   │   │   └── keys.ts     # queryKey factory
+│   │   ├── types/
+│   │   └── index.ts
+│   │
+│   └── dashboard/
+│       └── ...
+│
+├── components/             # Shared UI components (ui/ + layout/)
+│   ├── ui/                 # Primitives (Button, Input, Card, etc)
+│   │   ├── button.tsx
+│   │   ├── card.tsx
+│   │   └── ...
+│   ├── layout/             # Layout components (Header, Sidebar, etc)
+│   │   ├── header.tsx
+│   │   ├── sidebar.tsx
+│   │   └── ...
+│   └── index.ts
+│
+├── lib/                    # Shared utilities and configurations
+│   ├── query-client.ts     # TanStack Query setup (with global error/success handlers)
+│   ├── http.ts             # HTTP wrapper (unified fetch)
+│   ├── errors.ts           # ApiError class
+│   └── utils.ts            # Utility functions
+│
+├── types/                  # Shared types
+│   ├── api.ts
+│   ├── common.ts
+│   └── index.ts
+│
+└── test/                   # Test utilities and setup
+    ├── setup.ts
+    └── utils.tsx
+```
 
 ---
 
@@ -75,7 +160,7 @@ const { mutate: addDepartment } = useAddDepartment({
 
 ### 3. Effects at the Edges (Side Effects at Boundaries)
 
-**Side effects are aggregated at boundaries (API layer, QueryClient, interceptor).**
+**Side effects are aggregated at boundaries (API layer, QueryClient, interceptor, effect handlers).**
 
 - API errors normalized in API layer (`ApiError` etc), not interpreted in UI layer
 - Toast displayed at **global layer** (QueryClient's `QueryCache/MutationCache` or HTTP interceptor)
@@ -90,7 +175,54 @@ const { mutate: addDepartment } = useAddDepartment({
 - Use queryKey factory to avoid hardcoded strings
 - Reactive updates via `invalidateQueries` (Reagent-style)
 
-### 5. Allowed `useEffect` Use Cases
+### 5. Unidirectional Codebase (shared → features → app)
+
+**Enforce dependency flow: shared code → features → app layer.**
+
+- `components/`, `lib/`, `types/` are shared (no dependencies on features or app)
+- `features/` can use shared code, but **cannot import from other features**
+- `app/` can use both shared code and features (composition layer)
+
+```typescript
+// ✅ GOOD: Feature imports from shared
+// features/settings/components/AccountList.tsx
+import { Card } from '@/components/ui/card'
+import { useAccounts } from '../hooks/queries/use-accounts'
+
+// ❌ BAD: Feature imports from another feature
+// features/settings/components/AccountList.tsx
+import { useDashboardData } from '@/features/dashboard/hooks'  // PROHIBITED
+
+// ✅ GOOD: App layer composes features
+// app/routes/settings.tsx
+import { AccountList } from '@/features/settings'
+import { DashboardWidget } from '@/features/dashboard'
+```
+
+### 6. Feature Isolation (Controlled Exports via index.ts)
+
+**Features expose only what's needed through index.ts.**
+
+- Internal implementation stays private
+- Consumers use only public API
+- Makes refactoring easier (internals can change without breaking consumers)
+
+```typescript
+// ✅ GOOD: Controlled export
+// features/settings/index.ts
+export { AccountList } from './components/AccountList'
+export { useAccounts, useDepartments } from './hooks/queries'
+export { useAddDepartment } from './hooks/mutations'
+export type { Account, Department } from './types'
+
+// ❌ BAD: Direct deep import
+import { AccountCard } from '@/features/settings/components/AccountCard'  // Internal component
+
+// ✅ GOOD: Use public API
+import { AccountList } from '@/features/settings'
+```
+
+### 7. Allowed `useEffect` Use Cases
 
 **`useEffect` allowed only for UI-local concerns (DOM manipulation, measurement, focus).**
 
@@ -102,7 +234,7 @@ Allowed:
 
 Prohibited:
 - Data fetching (use TanStack Query)
-- Watch state to toast/navigate/log (use mutation's onSuccess/onError)
+- Watch state to toast/navigate/log (use mutation's onSuccess/onError or event/effect handlers)
 
 ---
 
@@ -113,7 +245,7 @@ Prohibited:
 **Manage queryKey with factory functions to avoid hardcoded strings.**
 
 ```typescript
-// ✅ GOOD: queryKey factory
+// features/settings/hooks/keys.ts
 export const settingsKeys = {
   all: ['settings'] as const,
   accounts: () => [...settingsKeys.all, 'accounts'] as const,
@@ -132,7 +264,7 @@ useQuery({ queryKey: ['accounts'], ... })  // Prone to inconsistency
 **Define unified error type in API layer and wrap fetch.**
 
 ```typescript
-// api/errors.ts
+// lib/errors.ts
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -144,7 +276,9 @@ export class ApiError extends Error {
   }
 }
 
-// api/http.ts
+// lib/http.ts
+import { ApiError } from './errors'
+
 export async function http<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...options,
@@ -166,7 +300,10 @@ export async function http<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
-// api/settings.ts
+// features/settings/api/settings.api.ts
+import { http } from '@/lib/http'
+import type { Account, Department, CreateDepartmentInput } from '../types'
+
 export const settingsApi = {
   getAccounts: () => http<Account[]>('/api/settings/accounts'),
   getDepartments: () => http<Department[]>('/api/settings/departments'),
@@ -186,7 +323,7 @@ export const settingsApi = {
 // lib/query-client.ts
 import { QueryClient, QueryCache, MutationCache } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ApiError } from '@/api/errors'
+import { ApiError } from './errors'
 
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -245,13 +382,13 @@ function Page() {
 
 ### Feature Query Hooks
 
-**Place `useXxxQuery` / `useXxxMutation` in feature layer.**
+**Place `useXxxQuery` / `useXxxMutation` in feature's hooks/ directory.**
 
 ```typescript
-// features/settings/queries/use-accounts.ts
+// features/settings/hooks/queries/use-accounts.ts
 import { useQuery } from '@tanstack/react-query'
-import { settingsApi } from '@/api/settings'
-import { settingsKeys } from './keys'
+import { settingsApi } from '../../api/settings.api'
+import { settingsKeys } from '../keys'
 
 export function useAccounts() {
   return useQuery({
@@ -260,7 +397,7 @@ export function useAccounts() {
   })
 }
 
-// features/settings/queries/use-departments.ts
+// features/settings/hooks/queries/use-departments.ts
 export function useDepartments() {
   return useQuery({
     queryKey: settingsKeys.departments(),
@@ -268,10 +405,10 @@ export function useDepartments() {
   })
 }
 
-// features/settings/mutations/use-add-department.ts
+// features/settings/hooks/mutations/use-add-department.ts
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { settingsApi } from '@/api/settings'
-import { settingsKeys } from '../queries/keys'
+import { settingsApi } from '../../api/settings.api'
+import { settingsKeys } from '../keys'
 
 export function useAddDepartment() {
   const queryClient = useQueryClient()
@@ -330,18 +467,157 @@ function Page() {
 
 ---
 
+## Event/Effect Layer (Re-frame Core)
+
+For complex application-level side effects that span features or require coordination, use the Event/Effect layer in `app/`.
+
+### Event Handlers (app/events/)
+
+**Events define state transitions and request effects.**
+
+```typescript
+// app/events/settings.events.ts
+import { queryClient } from '@/lib/query-client'
+import { settingsKeys } from '@/features/settings/hooks/keys'
+import { toast } from 'sonner'
+import { navigateToEffect } from '../effects/navigation.effects'
+
+export const settingsEvents = {
+  // Simple event: just invalidate query
+  refreshDepartments: () => {
+    queryClient.invalidateQueries({ queryKey: settingsKeys.departments() })
+  },
+
+  // Complex event: coordinate multiple effects
+  departmentCreated: (departmentId: string) => {
+    queryClient.invalidateQueries({ queryKey: settingsKeys.departments() })
+    toast.success('Department created successfully')
+    navigateToEffect(`/settings/departments/${departmentId}`)
+  },
+}
+```
+
+### Effect Handlers (app/effects/)
+
+**Effects implement side effects (isolated and testable).**
+
+```typescript
+// app/effects/navigation.effects.ts
+import { useNavigate } from 'react-router-dom'
+
+// For use in event handlers
+let navigateRef: ReturnType<typeof useNavigate> | null = null
+
+export function setNavigateRef(navigate: ReturnType<typeof useNavigate>) {
+  navigateRef = navigate
+}
+
+export function navigateToEffect(path: string) {
+  if (navigateRef) {
+    navigateRef(path)
+  }
+}
+
+// app/effects/analytics.effects.ts
+export const analyticsEffects = {
+  trackEvent: (eventName: string, properties?: Record<string, any>) => {
+    // Analytics implementation
+    console.log('Analytics:', eventName, properties)
+  },
+
+  trackPageView: (path: string) => {
+    // Page view tracking
+    console.log('Page view:', path)
+  },
+}
+
+// app/effects/logging.effects.ts
+export const loggingEffects = {
+  logError: (error: Error, context?: Record<string, any>) => {
+    // Error logging service
+    console.error('Error:', error, context)
+  },
+
+  logInfo: (message: string, context?: Record<string, any>) => {
+    console.info('Info:', message, context)
+  },
+}
+```
+
+### Subscriptions (app/subs/)
+
+**Subscriptions provide derived/computed data (like Reagent subscriptions).**
+
+```typescript
+// app/subs/settings.subs.ts
+import { useAccounts } from '@/features/settings'
+
+export function useActiveAccountsCount() {
+  const { data: accounts } = useAccounts()
+  return accounts?.filter(a => a.status === 'active').length ?? 0
+}
+
+export function useAccountsByDepartment(departmentId: string) {
+  const { data: accounts } = useAccounts()
+  return accounts?.filter(a => a.departmentId === departmentId) ?? []
+}
+```
+
+### When to Use Event/Effect Layer vs Feature Hooks
+
+**Use feature hooks (queries/mutations) when:**
+- Side effect is local to the feature
+- Simple API call + invalidation
+- No cross-feature coordination needed
+
+**Use event/effect layer when:**
+- Side effect spans multiple features
+- Complex orchestration (API + toast + navigation + analytics)
+- Need centralized logging or error handling
+- Want testable, isolated effect implementations
+
+```typescript
+// ✅ GOOD: Simple feature-level mutation
+function AccountListPage() {
+  const { mutate: deleteAccount } = useDeleteAccount({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: settingsKeys.accounts() })
+      toast.success('Account deleted')
+    },
+  })
+
+  return <AccountList onDelete={deleteAccount} />
+}
+
+// ✅ GOOD: Complex app-level event
+function CreateDepartmentPage() {
+  const { mutate: createDepartment } = useCreateDepartment({
+    onSuccess: (data) => {
+      // Dispatch to event handler for complex orchestration
+      settingsEvents.departmentCreated(data.id)
+    },
+  })
+
+  return <CreateDepartmentForm onSubmit={createDepartment} />
+}
+```
+
+---
+
 ## Page Example: Subscribe → Render → Event
 
 **Pure subscription-driven UI with no useEffect, no toast calls.**
 
 ```typescript
-// pages/settings/accounts/index.tsx
-import { useAccounts } from '@/features/settings/queries/use-accounts'
-import { useDepartments } from '@/features/settings/queries/use-departments'
-import { useAddDepartment } from '@/features/settings/mutations/use-add-department'
-import { RequireRole } from '@/components/auth/require-role'
+// app/routes/settings/accounts.tsx
+import { useAccounts } from '@/features/settings'
+import { useDepartments } from '@/features/settings'
+import { useAddDepartment } from '@/features/settings'
+import { AccountList, DepartmentList } from '@/features/settings'
+import { Spinner, ErrorView } from '@/components/ui'
+import { RequireRole } from '@/components/layout'
 
-export default function AccountManagementPage() {
+export function AccountManagementPage() {
   return (
     <RequireRole role="admin">
       <AccountManagementContent />
@@ -440,26 +716,37 @@ function Modal({ isOpen, onClose }: ModalProps) {
 }
 ```
 
-### Cross-Page UI State: Only When Needed, Keep Small
+### Application State: app/store/ (Small and Minimal)
 
-**Introduce small cross-page state (jotai/zustand etc) only when necessary.**
+**Use zustand/jotai for small cross-page UI state only when necessary.**
 
 - Don't create huge Context/Reducer upfront
-- Don't put server state in Context (subscribe via TanStack Query)
-- Don't put derived data in Context (compute with useMemo / select)
+- Don't put server state in store (subscribe via TanStack Query)
+- Don't put derived data in store (compute with useMemo / select / subscriptions)
 
 ```typescript
-// ✅ GOOD: Small UI state only (theme, sidebar toggle etc)
-import { atom, useAtom } from 'jotai'
+// app/store/ui.store.ts
+import { create } from 'zustand'
 
-const sidebarOpenAtom = atom(true)
-
-export function useSidebar() {
-  return useAtom(sidebarOpenAtom)
+interface UIState {
+  sidebarOpen: boolean
+  theme: 'light' | 'dark'
+  toggleSidebar: () => void
+  setTheme: (theme: 'light' | 'dark') => void
 }
 
-// ❌ BAD: Duplicate server state in Context/Atom
-const accountsAtom = atom<Account[]>([])  // Should be managed by TanStack Query
+export const useUIStore = create<UIState>((set) => ({
+  sidebarOpen: true,
+  theme: 'light',
+  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+  setTheme: (theme) => set({ theme }),
+}))
+
+// ❌ BAD: Duplicate server state in store
+interface BadState {
+  accounts: Account[]  // Should be managed by TanStack Query
+  setAccounts: (accounts: Account[]) => void
+}
 ```
 
 ### Context + Reducer is "Last Resort"
@@ -520,7 +807,7 @@ function CreateAccountWizard() {
 **Combine small components.**
 
 ```typescript
-// ✅ GOOD: Split small and compose
+// components/ui/card.tsx
 export function Card({ children, variant = 'default' }: CardProps) {
   return <div className={`card card-${variant}`}>{children}</div>
 }
@@ -549,6 +836,7 @@ export function CardBody({ children }: { children: React.ReactNode }) {
 **Share state between parent and children using Context.**
 
 ```typescript
+// components/ui/tabs.tsx
 const TabsContext = createContext<{
   activeTab: string
   setActiveTab: (tab: string) => void
@@ -604,8 +892,10 @@ export function TabPanel({ id, children }: { id: string; children: React.ReactNo
 **Separate subscription in Container, rendering in Presenter.**
 
 ```typescript
+// features/settings/components/AccountList.tsx
+
 // ✅ GOOD: Container (subscribe, define events)
-function AccountListContainer() {
+export function AccountListContainer() {
   const { data, isLoading, isError } = useAccounts()
   const { mutate: deleteAccount } = useDeleteAccount()
 
@@ -683,7 +973,7 @@ function List<T>({
 ### Toggle / Counter (UI state)
 
 ```typescript
-// ✅ GOOD: UI local state management
+// lib/hooks/use-toggle.ts
 export function useToggle(initialValue = false) {
   const [value, setValue] = useState(initialValue)
 
@@ -710,6 +1000,7 @@ function Page() {
 ### Debounce
 
 ```typescript
+// lib/hooks/use-debounce.ts
 export function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value)
 
@@ -740,6 +1031,7 @@ function SearchBar() {
 ### Local Storage
 
 ```typescript
+// lib/hooks/use-local-storage.ts
 export function useLocalStorage<T>(key: string, initialValue: T) {
   const [value, setValue] = useState<T>(() => {
     try {
@@ -824,7 +1116,7 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60,  // Fresh for 1 minute (no refetch)
-      cacheTime: 1000 * 60 * 5,  // Keep cache for 5 minutes
+      gcTime: 1000 * 60 * 5,  // Keep cache for 5 minutes (formerly cacheTime)
       refetchOnWindowFocus: true,  // Refetch on window focus
       retry: 1,
     },
@@ -877,8 +1169,8 @@ export function VirtualizedList({ items }: { items: Item[] }) {
 import { lazy, Suspense } from 'react'
 
 // ✅ GOOD: Route-based splitting
-const Dashboard = lazy(() => import('./pages/Dashboard'))
-const Settings = lazy(() => import('./pages/Settings'))
+const Dashboard = lazy(() => import('./routes/Dashboard'))
+const Settings = lazy(() => import('./routes/Settings'))
 
 function App() {
   return (
@@ -892,7 +1184,7 @@ function App() {
 }
 
 // ✅ GOOD: Heavy component splitting
-const HeavyChart = lazy(() => import('./components/HeavyChart'))
+const HeavyChart = lazy(() => import('@/components/ui/HeavyChart'))
 
 function DashboardPage() {
   return (
@@ -1054,6 +1346,7 @@ function Page() {
 **ErrorBoundary is for render-time exceptions. Cannot catch async request errors.**
 
 ```typescript
+// components/layout/ErrorBoundary.tsx
 interface ErrorBoundaryProps {
   children: React.ReactNode
   fallback?: (error: Error, reset: () => void) => React.ReactNode
@@ -1079,7 +1372,7 @@ export class ErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('ErrorBoundary caught:', error, errorInfo)
-    // Send to error reporting service
+    // Send to error reporting service (app/effects/logging.effects.ts)
   }
 
   reset = () => {
@@ -1105,7 +1398,7 @@ export class ErrorBoundary extends React.Component<
   }
 }
 
-// Usage
+// Usage in app/provider.tsx
 <ErrorBoundary>
   <App />
 </ErrorBoundary>
@@ -1282,7 +1575,7 @@ export const queryClient = new QueryClient({
   }),
 })
 
-// mutations/use-add-department.ts
+// features/settings/hooks/mutations/use-add-department.ts
 export function useAddDepartment() {
   const queryClient = useQueryClient()
 
@@ -1308,7 +1601,7 @@ export function useAddDepartment() {
 
 ```typescript
 // app/settings/accounts/page.tsx (Server Component)
-import { getAccounts } from '@/api/settings-server'
+import { getAccounts } from '@/features/settings/api/settings-server.api'
 import { AccountListClient } from './client'
 
 export default async function AccountsPage() {
@@ -1320,7 +1613,7 @@ export default async function AccountsPage() {
 // app/settings/accounts/client.tsx (Client Component)
 'use client'
 
-import { useAccounts } from '@/features/settings/queries/use-accounts'
+import { useAccounts } from '@/features/settings'
 
 export function AccountListClient({ initialAccounts }: { initialAccounts: Account[] }) {
   const { data } = useAccounts({
@@ -1333,10 +1626,11 @@ export function AccountListClient({ initialAccounts }: { initialAccounts: Accoun
 
 ---
 
-## Reagent-inspired Checklist (Self-Check)
+## Reagent + Bulletproof Checklist (Self-Check)
 
 Verify the following:
 
+### Reagent/Re-frame Principles
 - [ ] `useEffect` is limited to UI-local concerns (DOM/focus/measurement)
 - [ ] Data fetching uses TanStack Query only (no custom fetch hooks)
 - [ ] Error toasts displayed at global layer (QueryCache/MutationCache or interceptor)
@@ -1347,6 +1641,14 @@ Verify the following:
 - [ ] UI follows "subscribe → render → event" flow
 - [ ] Side effects (API calls, toasts, navigation) aggregated at boundaries
 
+### Bulletproof Structure
+- [ ] Unidirectional dependency: shared → features → app
+- [ ] No cross-feature imports (features don't import from other features)
+- [ ] Features export public API through index.ts (controlled exports)
+- [ ] Server state in TanStack Query (not in Context/Reducer/Store)
+- [ ] Application state is minimal (small UI state only)
+- [ ] Event/Effect layer used for complex orchestration when needed
+
 ---
 
-**Remember**: Write working code first. Optimize after measuring. Add complexity only when needed.
+**Remember**: Write working code first. Optimize after measuring. Add complexity only when needed. Use bulletproof structure for organization, re-frame principles for behavior.
