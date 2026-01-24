@@ -5,7 +5,7 @@ description: Python language-level coding standards and best practices for Pytho
 
 # Python Coding Standards
 
-Language-level standards for Python 3.11+. Formatting handled by Ruff formatter.
+Language-level standards for Python 3.11+. Backend patterns in backend-patterns-fastapi.md. Formatting handled by Ruff formatter.
 
 ## Naming Conventions
 
@@ -389,8 +389,6 @@ def process_data(data: dict | None) -> Success[dict] | Failure[str]:
 
 ---
 
-# Project / Backend Engineering Standards
-
 ## Tooling and Static Analysis
 
 ### Required Tools
@@ -437,159 +435,6 @@ Public API requirements:
 Private code (`_` prefix):
 - May omit docstrings if obvious
 - Should still have type hints
-
-## Logging
-
-### Never Log Secrets or PII
-
-Must not log:
-- Passwords, API keys, tokens
-- Email addresses, names, phone numbers
-- Full request/response bodies
-
-```python
-import logging
-
-logger = logging.getLogger(__name__)
-
-# Never log PII or secrets
-logger.info(f"User: {user.email}")  # Wrong
-logger.debug(f"API key: {api_key}")  # Wrong
-
-# Log events without sensitive data
-logger.info("User logged in", extra={"user_id": user.id})
-```
-
-### Prefer Structured Logging and Lazy Formatting
-
-Use `extra` for structured data. Use lazy formatting (%) for performance.
-
-```python
-# Structured logging (preferred)
-logger.info(
-    "Order created",
-    extra={
-        "order_id": order.id,
-        "user_id": order.user_id,
-        "total": str(order.total),
-    },
-)
-
-# Lazy formatting (recommended for simple cases)
-logger.info("Order %s created for user %s", order.id, order.user_id)
-
-# f-strings work but are eagerly evaluated (not recommended)
-logger.info(f"Order {order.id} created")
-```
-
-### Use logger.exception() for Unexpected Errors
-
-```python
-try:
-    process_payment(order)
-except PaymentError:
-    logger.exception("Payment failed", extra={"order_id": order.id})
-    raise
-```
-
-## Security
-
-### Never Build SQL with String Concatenation
-
-Use parameterized queries. Parameter style varies by driver.
-
-**sqlite3**:
-
-```python
-import sqlite3
-
-def get_user(user_id: str, conn: sqlite3.Connection) -> tuple | None:
-    cursor = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-    return cursor.fetchone()
-```
-
-**psycopg (PostgreSQL)**:
-
-```python
-import psycopg
-
-def get_user(user_id: str, conn: psycopg.Connection) -> tuple | None:
-    cursor = conn.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-    return cursor.fetchone()
-```
-
-### Never Use shell=True
-
-```python
-import subprocess
-
-subprocess.run(["ls", "-l", filename], capture_output=True, check=True)
-```
-
-### Do Not Deserialize Untrusted Pickle
-
-```python
-import json
-
-data = json.loads(untrusted_string)
-```
-
-### Secrets from Environment
-
-```python
-import os
-
-API_KEY = os.environ["API_KEY"]
-DATABASE_URL = os.getenv("DATABASE_URL")
-```
-
-## Testing
-
-### Use pytest
-
-```python
-import pytest
-
-def test_calculate_discount():
-    price = 100.0
-    result = calculate_discount(price, "premium")
-    assert result == 90.0
-```
-
-### Tests Must Be Deterministic
-
-```python
-from datetime import datetime
-
-from freezegun import freeze_time
-
-@freeze_time("2024-01-01 12:00:00")
-def test_order_timestamp():
-    order = create_order(items)
-    assert order.created_at == datetime(2024, 1, 1, 12, 0, 0)
-```
-
-### Mock External I/O
-
-```python
-from unittest.mock import patch
-
-@patch("myapp.services.send_email")
-def test_registration_sends_email(mock_send):
-    register_user(email="user@example.com")
-    mock_send.assert_called_once()
-```
-
-### No Network in Unit Tests
-
-```python
-import pytest
-
-@pytest.mark.integration
-def test_api_call():
-    response = api_client.fetch_user("123")
-    assert response.status == 200
-```
 
 ---
 
