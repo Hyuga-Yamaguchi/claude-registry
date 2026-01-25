@@ -132,8 +132,8 @@ src/
 
 ```typescript
 // app/App.tsx (EXAMPLE)
-import { AppProvider } from './Provider'
-import { AppRouter } from './Router'
+import { AppProvider } from '@/app/Provider'
+import { AppRouter } from '@/app/Router'
 
 function App() {
   return (
@@ -370,7 +370,7 @@ import { useDashboard } from '@/features/dashboard'  // From another feature (PR
 // shared/lib/query-client.ts (TypeScript meta augmentation)
 import { QueryClient, MutationCache } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ApiError } from './errors'
+import { ApiError } from '@/shared/lib/errors'
 
 declare module '@tanstack/react-query' {
   interface Register {
@@ -408,9 +408,9 @@ export const queryClient = new QueryClient({
 // features/settings/data/departments/mutations.ts (EXAMPLE - useAddDepartment)
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { departmentsApi } from './api'
-import { departmentsKeys } from './keys'
-import type { Department } from '../../model/types'
+import { departmentsApi } from '@/features/settings/data/departments/api'
+import { departmentsKeys } from '@/features/settings/data/departments/keys'
+import type { Department } from '@/features/settings/model/types'
 import type { Command } from '@/app/events/types'
 
 export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void }) {
@@ -457,7 +457,7 @@ export class ApiError extends Error {
 
 ```typescript
 // shared/lib/http.ts
-import { ApiError } from './errors'
+import { ApiError } from '@/shared/lib/errors'
 
 export async function httpJson<T>(
   url: string,
@@ -524,7 +524,7 @@ export async function httpText(url: string, options?: RequestInit): Promise<stri
 ```typescript
 // features/settings/data/accounts/api.ts (EXAMPLE)
 import { httpJson } from '@/shared/lib/http'
-import type { Account } from '../../model/types'
+import type { Account } from '@/features/settings/model/types'
 
 export const accountsApi = {
   getAccounts: (signal?: AbortSignal) =>
@@ -536,7 +536,7 @@ export const accountsApi = {
 
 // features/settings/data/departments/api.ts (EXAMPLE)
 import { httpJson } from '@/shared/lib/http'
-import type { Department, CreateDepartmentInput } from '../../model/types'
+import type { Department, CreateDepartmentInput } from '@/features/settings/model/types'
 
 export const departmentsApi = {
   addDepartment: (data: CreateDepartmentInput) =>
@@ -573,8 +573,8 @@ export const departmentsKeys = {
 ```typescript
 // features/settings/data/accounts/queries.ts (EXAMPLE - useAccounts)
 import { useQuery } from '@tanstack/react-query'
-import { accountsApi } from './api'
-import { accountsKeys } from './keys'
+import { accountsApi } from '@/features/settings/data/accounts/api'
+import { accountsKeys } from '@/features/settings/data/accounts/keys'
 
 export function useAccounts() {
   return useQuery({
@@ -604,9 +604,9 @@ const { data: activeAccounts } = useQuery({
 ```typescript
 // features/settings/data/accounts/mutations.ts (EXAMPLE - useDeleteAccount)
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { accountsApi } from './api'
-import { accountsKeys } from './keys'
-import type { Account } from '../../model/types'
+import { accountsApi } from '@/features/settings/data/accounts/api'
+import { accountsKeys } from '@/features/settings/data/accounts/keys'
+import type { Account } from '@/features/settings/model/types'
 
 export function useDeleteAccount() {
   const queryClient = useQueryClient()
@@ -681,8 +681,8 @@ export type Command =
 
 // features/settings/pages/CreateDepartmentPage.tsx (EXAMPLE)
 import { useNavigate } from 'react-router-dom'
-import { useAddDepartment } from '../data/departments/mutations'
-import { CreateDepartmentForm } from '../ui/CreateDepartmentForm'
+import { useAddDepartment } from '@/features/settings/data/departments/mutations'
+import { CreateDepartmentForm } from '@/features/settings/ui/CreateDepartmentForm'
 
 export function CreateDepartmentPage() {
   const navigate = useNavigate()
@@ -753,10 +753,10 @@ export const isDarkModeAtom = atom((get) => get(themeAtom) === 'dark')
 
 ```typescript
 // features/settings/ui/AccountList.tsx (EXAMPLE)
-import { useAccounts } from '../data/accounts/queries'
-import { useDeleteAccount } from '../data/accounts/mutations'
+import { useAccounts } from '@/features/settings/data/accounts/queries'
+import { useDeleteAccount } from '@/features/settings/data/accounts/mutations'
 import { Spinner, ErrorView } from '@/shared/ui'
-import type { Account } from '../model/types'
+import type { Account } from '@/features/settings/model/types'
 
 // Container: Subscribe + wire events
 export function AccountListContainer() {
@@ -979,8 +979,8 @@ function Container() {
 ```typescript
 import { lazy, Suspense } from 'react'
 
-const Dashboard = lazy(() => import('./routes/Dashboard'))
-const Settings = lazy(() => import('./routes/Settings'))
+const Dashboard = lazy(() => import('@/features/dashboard/pages/DashboardPage'))
+const Settings = lazy(() => import('@/features/settings/pages/SettingsPage'))
 
 function App() {
   return (
@@ -1000,10 +1000,10 @@ function App() {
 import { lazy, Suspense } from 'react'
 
 // ❌ BAD: Monaco bundles with main chunk (~300KB)
-import { MonacoEditor } from './monaco-editor'
+import { MonacoEditor } from '@/components/MonacoEditor'
 
 // ✅ GOOD: Monaco loads on demand
-const MonacoEditor = lazy(() => import('./monaco-editor').then(m => ({ default: m.MonacoEditor })))
+const MonacoEditor = lazy(() => import('@/components/MonacoEditor').then(m => ({ default: m.MonacoEditor })))
 
 function CodePanel({ code }: { code: string }) {
   return (
@@ -1083,7 +1083,7 @@ export function MDPreview({ content }: { content: string }) {
 // features/settings/ui/__tests__/AccountList.test.tsx (EXAMPLE)
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AccountListContainer } from '../AccountList'
+import { AccountListContainer } from '@/features/settings/ui/AccountList'
 
 test('deletes account on click', async () => {
   render(<AccountListContainer />)
