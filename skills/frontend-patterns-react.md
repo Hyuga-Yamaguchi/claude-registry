@@ -166,9 +166,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 
-// Lazy load from features/*/pages/ and domains/*/pages/
+// Features
 const SettingsPage = lazy(() => import('@/features/settings/pages/SettingsPage'))
 const DashboardPage = lazy(() => import('@/features/dashboard/pages/DashboardPage'))
+
+// Domains (Auth)
 const LoginPage = lazy(() => import('@/domains/auth/pages/LoginPage'))
 
 export function AppRouter() {
@@ -1035,6 +1037,7 @@ function Container() {
 ```typescript
 import { lazy, Suspense } from 'react'
 
+// Pages
 const Dashboard = lazy(() => import('@/features/dashboard/pages/DashboardPage'))
 const Settings = lazy(() => import('@/features/settings/pages/SettingsPage'))
 
