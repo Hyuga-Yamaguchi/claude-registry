@@ -85,10 +85,10 @@ src/
 │
 ├── shared/                     # Shared across all features
 │   ├── ui/                     # Shared UI components
-│   │   ├── button.tsx          # Primitives
-│   │   ├── card.tsx
-│   │   ├── spinner.tsx         # Feedback components
-│   │   └── error-view.tsx
+│   │   ├── Button.tsx          # Primitives
+│   │   ├── Card.tsx
+│   │   ├── Spinner.tsx         # Feedback components
+│   │   └── ErrorView.tsx
 │   ├── lib/                    # Shared utilities & configurations
 │   │   ├── query-client.ts     # TanStack Query setup
 │   │   ├── http.ts             # httpJson, httpText
@@ -109,13 +109,8 @@ src/
     │   │   ├── AccountList.tsx
     │   │   ├── AccountCard.tsx
     │   │   └── DepartmentForm.tsx
-    │   ├── data/               # Small: flat, Large: resource split (see scaling guidelines)
-    │   │   ├── api.ts
-    │   │   ├── keys.ts
-    │   │   ├── queries.ts
-    │   │   ├── mutations.ts
-    │   │   │
-    │   │   ├── accounts/       # Large feature: split by resource
+    │   ├── data/               # Split by resource for proper granularity
+    │   │   ├── accounts/
     │   │   │   ├── api.ts
     │   │   │   ├── keys.ts
     │   │   │   ├── queries.ts
@@ -206,15 +201,11 @@ export function AppRouter() {
   - Examples: `AccountList.tsx`, `AccountCard.tsx`, `DepartmentForm.tsx`
   - Pure presenters or containers without routing logic
   - Organize by subdirectory when >5 components (e.g., `accounts/`, `departments/`)
-- `data/`: Server cache layer (TanStack Query)
-  - **Small features (≤5 resources)**: Flat structure
-    - `api.ts`: All fetchers
-    - `keys.ts`: All queryKey factories
-    - `queries.ts`: All query hooks
-    - `mutations.ts`: All mutation hooks
-  - **Large features (>5 resources)**: Split by resource
-    - `data/accounts/api.ts`, `data/accounts/keys.ts`, etc.
-    - `data/departments/api.ts`, `data/departments/keys.ts`, etc.
+- `data/`: Server cache layer (TanStack Query), split by resource for proper granularity
+  - Structure: `data/<resource>/api.ts`, `data/<resource>/keys.ts`, `data/<resource>/queries.ts`, `data/<resource>/mutations.ts`
+  - Examples: `data/accounts/`, `data/departments/`, `data/settings/`
+  - Each resource subdirectory contains its own API client, query keys, queries, and mutations
+  - **Rationale**: Resource-based organization provides consistent structure regardless of project size, improves file discoverability, and prevents individual files from becoming too large
 - `model/`: Feature-local types, schemas, selectors
   - `types.ts`: Domain types specific to this feature
   - `schemas.ts`: Zod schemas for validation
@@ -350,7 +341,7 @@ Server state via TanStack Query (required). No `useState + useEffect` for fetchi
 
 ```typescript
 // ✅ GOOD
-import { Card } from '@/shared/ui/card'
+import { Card } from '@/shared/ui/Card'
 import { useUser } from '@/domains/auth'  // Cross-cutting domain OK
 
 // ❌ BAD
@@ -414,22 +405,22 @@ export const queryClient = new QueryClient({
   },
 })
 
-// features/settings/data/mutations.ts (EXAMPLE - useAddDepartment)
+// features/settings/data/departments/mutations.ts (EXAMPLE - useAddDepartment)
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { settingsApi } from './api'
-import { settingsKeys } from './keys'
-import type { Department } from '../model/types'
+import { departmentsApi } from './api'
+import { departmentsKeys } from './keys'
+import type { Department } from '../../model/types'
 import type { Command } from '@/app/events/types'
 
 export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void }) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: settingsApi.addDepartment,
+    mutationFn: departmentsApi.addDepartment,
     meta: { toastError: true },  // Error toast opt-in
     onSuccess: (data: Department) => {
-      queryClient.invalidateQueries({ queryKey: settingsKeys.departments() })
+      queryClient.invalidateQueries({ queryKey: departmentsKeys.list() })
       toast.success('Department added')  // Success toast here
       options?.onCommand?.({ type: 'NAVIGATE', to: `/settings/departments/${data.id}` })
     },
@@ -531,22 +522,28 @@ export async function httpText(url: string, options?: RequestInit): Promise<stri
 ### API Client Example
 
 ```typescript
-// features/settings/data/api.ts (EXAMPLE)
+// features/settings/data/accounts/api.ts (EXAMPLE)
 import { httpJson } from '@/shared/lib/http'
-import type { Account, Department, CreateDepartmentInput } from '../model/types'
+import type { Account } from '../../model/types'
 
-export const settingsApi = {
+export const accountsApi = {
   getAccounts: (signal?: AbortSignal) =>
     httpJson<Account[]>('/api/settings/accounts', { signal }),
 
+  deleteAccount: (id: string) =>
+    httpJson<void>(`/api/settings/accounts/${id}`, { method: 'DELETE' }),
+}
+
+// features/settings/data/departments/api.ts (EXAMPLE)
+import { httpJson } from '@/shared/lib/http'
+import type { Department, CreateDepartmentInput } from '../../model/types'
+
+export const departmentsApi = {
   addDepartment: (data: CreateDepartmentInput) =>
     httpJson<Department>('/api/settings/departments', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-
-  deleteAccount: (id: string) =>
-    httpJson<void>(`/api/settings/accounts/${id}`, { method: 'DELETE' }),
 }
 ```
 
@@ -557,27 +554,32 @@ export const settingsApi = {
 ### QueryKey Factory
 
 ```typescript
-// features/settings/data/keys.ts (EXAMPLE)
-export const settingsKeys = {
-  all: ['settings'] as const,
-  accounts: () => [...settingsKeys.all, 'accounts'] as const,
-  accountDetail: (id: string) => [...settingsKeys.accounts(), id] as const,
-  departments: () => [...settingsKeys.all, 'departments'] as const,
+// features/settings/data/accounts/keys.ts (EXAMPLE)
+export const accountsKeys = {
+  all: ['settings', 'accounts'] as const,
+  list: () => [...accountsKeys.all, 'list'] as const,
+  detail: (id: string) => [...accountsKeys.all, id] as const,
+}
+
+// features/settings/data/departments/keys.ts (EXAMPLE)
+export const departmentsKeys = {
+  all: ['settings', 'departments'] as const,
+  list: () => [...departmentsKeys.all, 'list'] as const,
 }
 ```
 
 ### Query Hook (No Toast)
 
 ```typescript
-// features/settings/data/queries.ts (EXAMPLE - useAccounts)
+// features/settings/data/accounts/queries.ts (EXAMPLE - useAccounts)
 import { useQuery } from '@tanstack/react-query'
-import { settingsApi } from './api'
-import { settingsKeys } from './keys'
+import { accountsApi } from './api'
+import { accountsKeys } from './keys'
 
 export function useAccounts() {
   return useQuery({
-    queryKey: settingsKeys.accounts(),
-    queryFn: ({ signal }) => settingsApi.getAccounts(signal),
+    queryKey: accountsKeys.list(),
+    queryFn: ({ signal }) => accountsApi.getAccounts(signal),
     // ⚠️ No meta.toastError for queries (background refetch would spam)
   })
 }
@@ -587,8 +589,8 @@ export function useAccounts() {
 
 ```typescript
 const { data: activeAccounts } = useQuery({
-  queryKey: settingsKeys.accounts(),
-  queryFn: ({ signal }) => settingsApi.getAccounts(signal),
+  queryKey: accountsKeys.list(),
+  queryFn: ({ signal }) => accountsApi.getAccounts(signal),
   select: (accounts) => accounts.filter(a => a.status === 'active'),
 })
 ```
@@ -600,32 +602,32 @@ const { data: activeAccounts } = useQuery({
 **Optimistic UX**: Use `setQueryData` for immediate feedback (e.g., list operations where stale data is acceptable).
 
 ```typescript
-// features/settings/data/mutations.ts (EXAMPLE - useDeleteAccount)
+// features/settings/data/accounts/mutations.ts (EXAMPLE - useDeleteAccount)
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { settingsApi } from './api'
-import { settingsKeys } from './keys'
-import type { Account } from '../model/types'
+import { accountsApi } from './api'
+import { accountsKeys } from './keys'
+import type { Account } from '../../model/types'
 
 export function useDeleteAccount() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: settingsApi.deleteAccount,
+    mutationFn: accountsApi.deleteAccount,
     onMutate: async (id: string) => {
-      await queryClient.cancelQueries({ queryKey: settingsKeys.accounts() })
-      const previous = queryClient.getQueryData<Account[]>(settingsKeys.accounts())
-      queryClient.setQueryData<Account[]>(settingsKeys.accounts(), (old = []) =>
+      await queryClient.cancelQueries({ queryKey: accountsKeys.list() })
+      const previous = queryClient.getQueryData<Account[]>(accountsKeys.list())
+      queryClient.setQueryData<Account[]>(accountsKeys.list(), (old = []) =>
         old.filter(a => a.id !== id)
       )
       return { previous }
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(settingsKeys.accounts(), context.previous)
+        queryClient.setQueryData(accountsKeys.list(), context.previous)
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: settingsKeys.accounts() })
+      queryClient.invalidateQueries({ queryKey: accountsKeys.list() })
     },
   })
 }
@@ -679,7 +681,7 @@ export type Command =
 
 // features/settings/pages/CreateDepartmentPage.tsx (EXAMPLE)
 import { useNavigate } from 'react-router-dom'
-import { useAddDepartment } from '../data/mutations'
+import { useAddDepartment } from '../data/departments/mutations'
 import { CreateDepartmentForm } from '../ui/CreateDepartmentForm'
 
 export function CreateDepartmentPage() {
@@ -751,7 +753,8 @@ export const isDarkModeAtom = atom((get) => get(themeAtom) === 'dark')
 
 ```typescript
 // features/settings/ui/AccountList.tsx (EXAMPLE)
-import { useAccounts, useDeleteAccount } from '../data/queries'
+import { useAccounts } from '../data/accounts/queries'
+import { useDeleteAccount } from '../data/accounts/mutations'
 import { Spinner, ErrorView } from '@/shared/ui'
 import type { Account } from '../model/types'
 
@@ -1095,13 +1098,15 @@ test('deletes account on click', async () => {
 ## Project Standards
 
 - **ESLint + Prettier + TypeScript + Husky**: Code quality, formatting, type safety, pre-commit hooks
-- **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/shared/ui/card'`)
-- **File Naming**: kebab-case (`account-list.tsx`), enforce with ESLint `check-file` plugin
+- **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/shared/ui/Card'`)
+- **File Naming**:
+  - **Component files (.tsx)**: PascalCase (`AccountList.tsx`, `Button.tsx`, `LoginPage.tsx`)
+  - **Non-component files (.ts)**: kebab-case (`api.ts`, `keys.ts`, `queries.ts`, `mutations.ts`, `use-toggle.ts`)
+  - Enforce with ESLint `check-file` plugin
 - **File Size**: Target 100-200 lines, max 400 lines per `.ts`/`.tsx` file for readability
   - **If exceeding 400 lines**:
     - Components: Split into Container/Presenter or extract sub-components
-    - Hooks: Split queries/mutations into separate files
-    - API clients: Split by resource (e.g., `accounts.api.ts`, `departments.api.ts`)
+    - Data layer: Already organized by resource in `data/<resource>/` (api.ts, keys.ts, queries.ts, mutations.ts)
     - Utils: Split by responsibility (e.g., `date.utils.ts`, `string.utils.ts`)
 
 ---
