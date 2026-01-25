@@ -57,16 +57,34 @@ src/
 ├── app/                        # Application layer
 │   ├── App.tsx                 # Main application component (simple)
 │   ├── Provider.tsx            # Global providers (QueryClient, Theme, etc)
-│   ├── Router.tsx              # Router configuration
-│   ├── routes/                 # Route definitions (lazy imports + layouts)
-│   ├── events/                 # Cross-feature orchestration only
+│   ├── Router.tsx              # Router configuration (lazy imports only)
+│   ├── routes/                 # Route entry points (thin, lazy load from features/domains pages)
+│   │   ├── settings.tsx
+│   │   └── dashboard.tsx
+│   ├── events/                 # Cross-feature orchestration (strict scope, see rules below)
 │   │   ├── types.ts
 │   │   └── handlers/
-│   ├── effects/                # Cross-feature effect implementations
+│   ├── effects/                # Cross-feature side effects (strict scope, see rules below)
 │   │   ├── analytics.effects.ts
 │   │   └── logging.effects.ts
 │   └── store/                  # Global application state (jotai atoms)
 │       └── ui.atoms.ts
+│
+├── domains/                    # Cross-cutting domains (importable by features, ESLint allowed)
+│   └── auth/
+│       ├── pages/              # Route entry points
+│       │   └── LoginPage.tsx
+│       ├── ui/                 # Reusable components
+│       │   └── ProtectedRoute.tsx
+│       ├── data/
+│       │   ├── api.ts
+│       │   ├── keys.ts
+│       │   ├── queries.ts
+│       │   └── mutations.ts
+│       ├── model/
+│       │   ├── types.ts
+│       │   └── schemas.ts
+│       └── index.ts            # Public exports
 │
 ├── shared/                     # Shared across all features
 │   ├── ui/                     # Shared UI components
@@ -81,41 +99,35 @@ src/
 │   │   └── hooks/              # Shared hooks
 │   │       ├── use-toggle.ts
 │   │       └── use-debounce.ts
-│   └── types/                  # Shared types
-│       ├── api.ts
-│       └── common.ts
+│   └── types/                  # Truly shared types only (see guidelines below)
+│       └── common.ts           # Pagination, ApiResponse<T>, etc
 │
-└── features/                   # Feature modules (domain-driven, isolated)
-    ├── auth/                   # ⚠️ Cross-feature domain (can be imported by other features)
-    │   ├── ui/                 # Feature-private UI
-    │   │   ├── login-page/
-    │   │   │   ├── LoginPage.tsx
-    │   │   │   └── LoginForm.tsx
-    │   │   └── ProtectedRoute.tsx
-    │   ├── data/               # Server cache layer (TanStack Query)
-    │   │   ├── api.ts          # Fetchers (no React)
-    │   │   ├── keys.ts         # QueryKey factory
-    │   │   ├── queries.ts      # queryOptions / useQuery hooks
-    │   │   └── mutations.ts    # useMutation hooks
-    │   ├── model/              # Feature-local domain logic
-    │   │   ├── types.ts        # Types
-    │   │   └── schemas.ts      # Zod schemas (if needed)
-    │   └── index.ts            # Public exports only
-    │
-    ├── settings/               # Domain feature (isolated)
-    │   ├── ui/
-    │   │   ├── accounts-page/
-    │   │   │   ├── AccountsPage.tsx
-    │   │   │   ├── AccountList.tsx
-    │   │   │   └── AccountCard.tsx
-    │   │   └── departments-page/
-    │   │       ├── DepartmentsPage.tsx
-    │   │       └── DepartmentForm.tsx
-    │   ├── data/
+└── features/                   # Feature modules (strictly isolated, no cross-import)
+    ├── settings/               # Isolated feature
+    │   ├── pages/              # Route entry points
+    │   │   ├── SettingsPage.tsx
+    │   │   ├── AccountsPage.tsx
+    │   │   └── DepartmentsPage.tsx
+    │   ├── ui/                 # UI components (not pages)
+    │   │   ├── AccountList.tsx
+    │   │   ├── AccountCard.tsx
+    │   │   └── DepartmentForm.tsx
+    │   ├── data/               # Small: flat, Large: resource split (see scaling guidelines)
     │   │   ├── api.ts
     │   │   ├── keys.ts
     │   │   ├── queries.ts
-    │   │   └── mutations.ts
+    │   │   ├── mutations.ts
+    │   │   │
+    │   │   ├── accounts/       # Large feature: split by resource
+    │   │   │   ├── api.ts
+    │   │   │   ├── keys.ts
+    │   │   │   ├── queries.ts
+    │   │   │   └── mutations.ts
+    │   │   └── departments/
+    │   │       ├── api.ts
+    │   │       ├── keys.ts
+    │   │       ├── queries.ts
+    │   │       └── mutations.ts
     │   ├── model/
     │   │   └── types.ts
     │   └── index.ts
@@ -161,8 +173,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 
-const SettingsPage = lazy(() => import('./routes/settings'))
-const DashboardPage = lazy(() => import('./routes/dashboard'))
+// Lazy load from features/*/pages/ and domains/*/pages/
+const SettingsPage = lazy(() => import('@/features/settings/pages/SettingsPage'))
+const DashboardPage = lazy(() => import('@/features/dashboard/pages/DashboardPage'))
+const LoginPage = lazy(() => import('@/domains/auth/pages/LoginPage'))
 
 export function AppRouter() {
   return (
@@ -171,6 +185,7 @@ export function AppRouter() {
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/login" element={<LoginPage />} />
         </Routes>
       </Suspense>
     </BrowserRouter>
@@ -180,22 +195,112 @@ export function AppRouter() {
 
 ### Placement Rules
 
-**features/[domain]/**:
-- `ui/`: Feature-private components (Container/Presenter). Organize by page (e.g., `accounts-page/`, `departments-page/`) when >5 components.
+**domains/[domain]/** (Cross-cutting domains only):
+- For domains that multiple features depend on (auth, pricing, billing)
+- Importable by features (ESLint exception configured)
+- Same structure as features: `pages/`, `ui/`, `data/`, `model/`, `index.ts`
+
+**features/[domain]/** (Isolated features):
+- `pages/`: Route entry points (page components that compose UI)
+  - Examples: `SettingsPage.tsx`, `AccountsPage.tsx`, `DepartmentsPage.tsx`
+  - These are lazy-loaded from `app/routes/`
+  - Contain routing logic, page layout, and UI composition
+- `ui/`: Reusable UI components (NOT pages)
+  - Examples: `AccountList.tsx`, `AccountCard.tsx`, `DepartmentForm.tsx`
+  - Pure presenters or containers without routing logic
+  - Organize by subdirectory when >5 components (e.g., `accounts/`, `departments/`)
 - `data/`: Server cache layer (TanStack Query)
-  - `api.ts`: Fetchers (no React hooks, just `httpJson`/`httpText` calls)
-  - `keys.ts`: QueryKey factory
-  - `queries.ts`: `queryOptions` or `useQuery` hooks
-  - `mutations.ts`: `useMutation` hooks
+  - **Small features (≤5 resources)**: Flat structure
+    - `api.ts`: All fetchers
+    - `keys.ts`: All queryKey factories
+    - `queries.ts`: All query hooks
+    - `mutations.ts`: All mutation hooks
+  - **Large features (>5 resources)**: Split by resource
+    - `data/accounts/api.ts`, `data/accounts/keys.ts`, etc.
+    - `data/departments/api.ts`, `data/departments/keys.ts`, etc.
 - `model/`: Feature-local types, schemas, selectors
-- `index.ts`: Public API (minimal exports for cross-feature use)
+  - `types.ts`: Domain types specific to this feature
+  - `schemas.ts`: Zod schemas for validation
+- `index.ts`: Public API (minimal exports, avoid if possible)
 
 **shared/**:
-- `ui/`: Shared components (Button, Card, Spinner, etc)
-- `lib/`: Shared utilities (http, query-client, hooks)
-- `types/`: Shared types
+- `ui/`: Shared UI components (Button, Card, Spinner, ErrorView)
+- `lib/`: Shared utilities (http, query-client, errors, hooks)
+  - `http.ts`, `query-client.ts`, `errors.ts`
+  - `hooks/`: Shared custom hooks (`use-toggle.ts`, `use-debounce.ts`)
+- `types/`: **Truly shared types ONLY**
+  - ✅ Allowed: `Pagination`, `ApiResponse<T>`, `SortOrder`, utility types
+  - ❌ Prohibited: Feature-specific types, API contract types (keep near data/api)
+  - **Prevent "type graveyard"**: If a type is used by only one feature, keep it in that feature's `model/types.ts`
 
-**Cross-feature exceptions**: `features/auth/` can be imported by other features. For additional cross-cutting domains (pricing, plan), mark with ⚠️ comment or create `src/domains/` directory.
+**Page vs UI Component Decision**:
+- **pages/**: Route entry points with routing context (path params, query params, navigation)
+- **ui/**: Reusable components without routing concerns
+- **Rule**: If it needs `useParams()`, `useNavigate()`, or is directly referenced in `app/routes/`, it goes in `pages/`
+
+**Cross-feature Import Rules** (Enforced via ESLint):
+- ✅ Allowed: `features → domains` (e.g., `import { useUser } from '@/domains/auth'`)
+- ✅ Allowed: `features → shared`, `domains → shared`
+- ❌ Prohibited: `features → features` (strict isolation)
+- ❌ Prohibited: `shared → features`, `shared → domains` (unidirectional)
+
+### ESLint Configuration (Import Enforcement)
+
+Use `eslint-plugin-import` to enforce architectural boundaries:
+
+```js
+// .eslintrc.js (EXAMPLE)
+module.exports = {
+  rules: {
+    'import/no-restricted-paths': [
+      'error',
+      {
+        zones: [
+          // Prevent features from importing other features (strict isolation)
+          {
+            target: './src/features/settings',
+            from: './src/features',
+            except: ['./settings'],
+          },
+          {
+            target: './src/features/dashboard',
+            from: './src/features',
+            except: ['./dashboard'],
+          },
+          // Add more features as needed...
+
+          // Allow features → domains (cross-cutting domains are exempt)
+          // No restriction needed here - features CAN import from domains
+
+          // Enforce unidirectional codebase (prevent shared → features/app)
+          {
+            target: [
+              './src/shared/ui',
+              './src/shared/lib',
+              './src/shared/types',
+            ],
+            from: ['./src/features', './src/domains', './src/app'],
+          },
+
+          // Prevent features from importing from app layer
+          {
+            target: './src/features',
+            from: './src/app',
+          },
+
+          // Prevent domains from importing from app layer
+          {
+            target: './src/domains',
+            from: './src/app',
+          },
+        ],
+      },
+    ],
+  },
+}
+```
+
+**Note**: This configuration ensures features remain isolated while allowing controlled dependencies on cross-cutting domains.
 
 ---
 
@@ -243,7 +348,7 @@ Server state via TanStack Query (required). No `useState + useEffect` for fetchi
 ```typescript
 // ✅ GOOD
 import { Card } from '@/shared/ui/card'
-import { useUser } from '@/features/auth'  // Cross-cutting domain OK
+import { useUser } from '@/domains/auth'  // Cross-cutting domain OK
 
 // ❌ BAD
 import { useDashboard } from '@/features/dashboard'  // From another feature (PROHIBITED)
@@ -541,6 +646,26 @@ export function useDeleteAccount() {
 - Want testable, isolated effect implementations
 - Need to decouple from router (testability)
 
+### app/events and app/effects Scope Rules
+
+**⚠️ PRINCIPLE: Single-feature logic MUST stay in feature hooks by default.**
+
+**Allowed Responsibilities (Cross-feature Only)**:
+- Workflows spanning multiple features (e.g., "create account → assign to department → send notification")
+- Analytics/logging that aggregates data from multiple features
+- Complex error handling requiring coordination across features
+- Global side effects (e.g., WebSocket reconnection affecting multiple features)
+- Navigation orchestration when multiple features are involved
+
+**Prohibited Responsibilities**:
+- Single-feature API calls (use feature `mutations.ts` instead)
+- Simple CRUD operations within one feature (use feature hooks)
+- Feature-specific state updates (use feature hooks or jotai atoms)
+- UI-only logic that doesn't coordinate across features
+- Server state invalidation for single features (use `queryClient.invalidateQueries` in mutation callbacks)
+
+**Rationale**: `app/events` and `app/effects` are for cross-cutting concerns only. Keeping single-feature logic in feature hooks maintains feature isolation, improves testability, and prevents the app layer from becoming a dumping ground for arbitrary logic.
+
 ### Command Pattern (Navigation)
 
 ```typescript
@@ -549,7 +674,11 @@ export type Command =
   | { type: 'NAVIGATE'; to: string }
   | { type: 'INVALIDATE_QUERY'; queryKey: unknown[] }
 
-// app/routes/settings/create-department.tsx (EXAMPLE)
+// features/settings/pages/CreateDepartmentPage.tsx (EXAMPLE)
+import { useNavigate } from 'react-router-dom'
+import { useAddDepartment } from '../data/mutations'
+import { CreateDepartmentForm } from '../ui/CreateDepartmentForm'
+
 export function CreateDepartmentPage() {
   const navigate = useNavigate()
   const { mutate } = useAddDepartment({
@@ -618,9 +747,10 @@ export const isDarkModeAtom = atom((get) => get(themeAtom) === 'dark')
 ### Container / Presenter
 
 ```typescript
-// features/settings/ui/accounts-page/AccountList.tsx (EXAMPLE)
-import { useAccounts, useDeleteAccount } from '../../data/queries'
+// features/settings/ui/AccountList.tsx (EXAMPLE)
+import { useAccounts, useDeleteAccount } from '../data/queries'
 import { Spinner, ErrorView } from '@/shared/ui'
+import type { Account } from '../model/types'
 
 // Container: Subscribe + wire events
 export function AccountListContainer() {
@@ -944,7 +1074,11 @@ export function MDPreview({ content }: { content: string }) {
 **Tools**: Vitest, Testing Library, Playwright, MSW.
 
 ```typescript
-// features/settings/ui/accounts-page/__tests__/AccountList.test.tsx (EXAMPLE)
+// features/settings/ui/__tests__/AccountList.test.tsx (EXAMPLE)
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { AccountListContainer } from '../AccountList'
+
 test('deletes account on click', async () => {
   render(<AccountListContainer />)
   await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument())
