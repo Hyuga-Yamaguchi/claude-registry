@@ -17,7 +17,7 @@ For language-level TypeScript standards, see [coding-standards-typescript.md](co
 
 **What bulletproof-react provides:**
 - Features-based organization (domain boundaries)
-- Unidirectional codebase (shared → features → app)
+- Unidirectional codebase (shared → domains → features → app)
 - State classification (Component / Application / Server Cache / Form / URL)
 
 **What we add (Re-frame layer):**
@@ -206,7 +206,7 @@ export function AppRouter() {
   - Organize by subdirectory when >5 components (e.g., `accounts/`, `departments/`)
 - `data/`: Server cache layer (TanStack Query), split by resource for proper granularity
   - Structure: `data/<resource>/api.ts`, `data/<resource>/keys.ts`, `data/<resource>/queries.ts`, `data/<resource>/mutations.ts`
-  - Examples: `data/accounts/`, `data/departments/`, `data/settings/`
+  - Examples: `data/accounts/`, `data/departments/` (API resources, not feature names)
   - Each resource subdirectory contains its own API client, query keys, queries, and mutations
   - **Rationale**: Resource-based organization provides consistent structure regardless of project size, improves file discoverability, and prevents individual files from becoming too large
 - `model/`: Feature-local types, schemas, selectors
@@ -343,13 +343,13 @@ Side effects aggregated at: API layer (ApiError normalization), QueryClient (opt
 
 Server state via TanStack Query (required). No `useState + useEffect` for fetching. Use queryKey factories. Reactive updates via `invalidateQueries`.
 
-### 5. Unidirectional Codebase (shared → features → app)
+### 5. Unidirectional Codebase (shared → domains → features → app)
 
-`lib/`, `components/`, `types/` are shared (no feature/app dependencies). `features/` use shared code, cannot import other features (except cross-cutting domains like auth). `app/` composes features.
+`shared/` has no dependencies on other layers. `domains/` depend only on `shared/`. `features/` depend on `shared/` and `domains/` (but not other features). `app/` composes everything.
 
 ```typescript
 // ✅ GOOD
-import { Card } from '@/shared/ui/Card'
+import { Card } from '@/shared/ui'  // Barrel import from shared/ui
 import { useUser } from '@/domains/auth'  // Cross-cutting domain OK (via index.ts)
 import type { Command } from '@/shared/types/commands'  // Shared types OK
 
@@ -1109,7 +1109,7 @@ test('deletes account on click', async () => {
 ## Project Standards
 
 - **ESLint + Prettier + TypeScript + Husky**: Code quality, formatting, type safety, pre-commit hooks
-- **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/shared/ui/Card'`)
+- **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/shared/ui'`)
 - **File Naming**:
   - **Component files (.tsx)**: PascalCase (`AccountList.tsx`, `Button.tsx`, `LoginPage.tsx`)
   - **Non-component files (.ts)**: kebab-case (`api.ts`, `keys.ts`, `queries.ts`, `mutations.ts`, `use-toggle.ts`)
