@@ -71,7 +71,7 @@ src/
 │   └── auth/
 │       ├── pages/              # Route entry points
 │       │   └── LoginPage.tsx
-│       ├── ui/                 # Reusable components
+│       ├── components/         # Reusable components
 │       │   └── ProtectedRoute.tsx
 │       ├── data/
 │       │   ├── api.ts
@@ -84,7 +84,7 @@ src/
 │       └── index.ts            # Public exports (recommended for domains)
 │
 ├── shared/                     # Shared across all features
-│   ├── ui/                     # Shared UI components
+│   ├── components/             # Shared components
 │   │   ├── Button.tsx          # Primitives
 │   │   ├── Card.tsx
 │   │   ├── Spinner.tsx         # Feedback components
@@ -107,7 +107,7 @@ src/
     │   │   ├── SettingsPage.tsx
     │   │   ├── AccountsPage.tsx
     │   │   └── DepartmentsPage.tsx
-    │   ├── ui/                 # UI components (not pages)
+    │   ├── components/         # Components (not pages)
     │   │   ├── AccountList.tsx
     │   │   ├── AccountCard.tsx
     │   │   └── DepartmentForm.tsx
@@ -193,15 +193,16 @@ export function AppRouter() {
 **domains/[domain]/** (Cross-cutting domains only):
 - For domains that multiple features depend on (auth, pricing, billing)
 - Importable by features (ESLint exception configured)
-- Same structure as features: `pages/`, `ui/`, `data/`, `model/`, `index.ts`
+- Same structure as features: `pages/`, `components/`, `data/`, `model/`, `index.ts`
 - `index.ts`: **Recommended** - export public API for features to import (e.g., `export { useUser } from './data/queries'`)
 
 **features/[domain]/** (Isolated features):
 - `pages/`: Route entry points (page components that compose UI)
   - Examples: `SettingsPage.tsx`, `AccountsPage.tsx`, `DepartmentsPage.tsx`
   - These are lazy-loaded from `app/Router.tsx`
-  - Contain routing logic, page layout, and UI composition
-- `ui/`: Reusable UI components (NOT pages)
+  - **Keep pages thin**: Primarily component composition, routing logic (useParams, useNavigate), and page layout
+  - **Avoid**: Business logic, complex state management, data transformations (delegate to components or hooks)
+- `components/`: Reusable components (NOT pages)
   - Examples: `AccountList.tsx`, `AccountCard.tsx`, `DepartmentForm.tsx`
   - Pure presenters or containers without routing logic
   - Organize by subdirectory when >5 components (e.g., `accounts/`, `departments/`)
@@ -216,9 +217,9 @@ export function AppRouter() {
 - `index.ts`: ❌ **Prohibited** - features don't cross-import, so barrel exports serve no purpose and create boundary confusion. If sharing is needed: promote to `domains/` (for cross-cutting concerns) or move to `shared/` (for pure UI/types/utils)
 
 **shared/**:
-- `ui/`: Shared UI components (Button, Card, Spinner, ErrorView)
+- `components/`: Shared components (Button, Card, Spinner, ErrorView)
   - `index.ts`: Barrel exports for convenience (`export { Button } from './Button'`, etc.)
-  - Import as: `import { Spinner, ErrorView } from '@/shared/ui'`
+  - Import as: `import { Spinner, ErrorView } from '@/shared/components'`
 - `lib/`: Shared utilities (http, query-client, errors, hooks)
   - `http.ts`, `query-client.ts`, `errors.ts`
   - `hooks/`: Shared custom hooks (`use-toggle.ts`, `use-debounce.ts`)
@@ -229,10 +230,16 @@ export function AppRouter() {
   - ❌ Prohibited: Feature-specific types, API contract types (keep near data/api)
   - **Prevent "type graveyard"**: If a type is used by only one feature, keep it in that feature's `model/types.ts`
 
-**Page vs UI Component Decision**:
-- **pages/**: Route entry points with routing context (path params, query params, navigation)
-- **ui/**: Reusable components without routing concerns
-- **Rule**: If it needs `useParams()`, `useNavigate()`, or is directly referenced in `app/Router.tsx`, it goes in `pages/`
+**Page vs Component Decision**:
+- **pages/**: Route entry points with routing context
+  - **Routing concerns**: path params (`useParams()`), query params (`useSearchParams()`), navigation (`useNavigate()`)
+  - **Page layout**: Overall page structure and composition
+  - **Keep thin**: Primarily component composition and routing logic. Avoid business logic, complex state management, or data transformations
+  - **Directly referenced** in `app/Router.tsx` for lazy loading
+- **components/**: Reusable components without routing concerns
+  - Pure presenters or containers
+  - No routing hooks (`useParams`, `useNavigate`, `useSearchParams`)
+  - Focused on UI logic, data display, and user interactions
 
 **Cross-feature Import Rules** (Enforced via ESLint):
 - ✅ Allowed: `features → domains` (e.g., `import { useUser } from '@/domains/auth'`)
@@ -244,7 +251,7 @@ export function AppRouter() {
 **Routing & Navigation (迷子防止)**:
 - URL definitions live in **one place only**: `app/Router.tsx`
 - Route entry points (screens) live in `features/*/pages/` or `domains/*/pages/`
-- Reusable UI components live in `features/*/ui/` or `domains/*/ui/`
+- Reusable components live in `features/*/components/` or `domains/*/components/`
 - When adding a new route: define it in `Router.tsx`, create the page component in the appropriate `pages/` directory
 
 ### ESLint Configuration (Import Enforcement)
@@ -278,7 +285,7 @@ module.exports = {
           // Enforce unidirectional codebase (prevent shared → features/app)
           {
             target: [
-              './src/shared/ui',
+              './src/shared/components',
               './src/shared/lib',
               './src/shared/types',
             ],
@@ -395,7 +402,7 @@ Server state via TanStack Query (required). No `useState + useEffect` for fetchi
 
 ```typescript
 // ✅ GOOD
-import { Card } from '@/shared/ui'  // Barrel import from shared/ui
+import { Card } from '@/shared/components'  // Barrel import from shared/components
 import { useUser } from '@/domains/auth'  // Cross-cutting domain OK (via index.ts)
 import type { Command } from '@/shared/types/commands'  // Shared types OK
 
@@ -738,7 +745,7 @@ export type Command =
 // features/settings/pages/CreateDepartmentPage.tsx (EXAMPLE)
 import { useNavigate } from 'react-router-dom'
 import { useAddDepartment } from '@/features/settings/data/departments/mutations'
-import { CreateDepartmentForm } from '@/features/settings/ui/CreateDepartmentForm'
+import { CreateDepartmentForm } from '@/features/settings/components/CreateDepartmentForm'
 import type { Command } from '@/shared/types/commands'
 
 export function CreateDepartmentPage() {
@@ -810,10 +817,10 @@ export const isDarkModeAtom = atom((get) => get(themeAtom) === 'dark')
 ### Container / Presenter
 
 ```typescript
-// features/settings/ui/AccountList.tsx (EXAMPLE)
+// features/settings/components/AccountList.tsx (EXAMPLE)
 import { useAccounts } from '@/features/settings/data/accounts/queries'
 import { useDeleteAccount } from '@/features/settings/data/accounts/mutations'
-import { Spinner, ErrorView } from '@/shared/ui'
+import { Spinner, ErrorView } from '@/shared/components'
 import type { Account } from '@/features/settings/model/types'
 
 // Container: Subscribe + wire events
@@ -1139,10 +1146,10 @@ export function MDPreview({ content }: { content: string }) {
 **Tools**: Vitest, Testing Library, Playwright, MSW.
 
 ```typescript
-// features/settings/ui/__tests__/AccountList.test.tsx (EXAMPLE)
+// features/settings/components/__tests__/AccountList.test.tsx (EXAMPLE)
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AccountListContainer } from '@/features/settings/ui/AccountList'
+import { AccountListContainer } from '@/features/settings/components/AccountList'
 
 test('deletes account on click', async () => {
   render(<AccountListContainer />)
@@ -1157,7 +1164,7 @@ test('deletes account on click', async () => {
 ## Project Standards
 
 - **ESLint + Prettier + TypeScript + Husky**: Code quality, formatting, type safety, pre-commit hooks
-- **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/shared/ui'`)
+- **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/shared/components'`)
 - **File Naming**:
   - **Component files (.tsx)**: PascalCase (`AccountList.tsx`, `Button.tsx`, `LoginPage.tsx`)
   - **Non-component files (.ts)**: kebab-case (`api.ts`, `keys.ts`, `queries.ts`, `mutations.ts`, `use-toggle.ts`)
