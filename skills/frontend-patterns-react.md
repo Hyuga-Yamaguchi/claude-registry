@@ -17,7 +17,7 @@ For language-level TypeScript standards, see [coding-standards-typescript.md](co
 
 **What bulletproof-react provides:**
 - Features-based organization (domain boundaries)
-- Unidirectional codebase (shared → features → app)
+- Unidirectional codebase (shared → domains → features → app)
 - State classification (Component / Application / Server Cache / Form / URL)
 
 **What we add (Re-frame layer):**
@@ -50,98 +50,303 @@ For language-level TypeScript standards, see [coding-standards-typescript.md](co
 
 ## Directory Structure
 
+Based on [bulletproof-react](https://github.com/alan2207/bulletproof-react) with Reagent/Re-frame layer:
+
 ```
 src/
-├── app/                        # App layer (composition + re-frame core)
-│   ├── routes/                 # Route definitions (lazy imports + layouts)
-│   ├── events/                 # Cross-feature event handlers
-│   │   ├── types.ts            # Command types
-│   │   └── handlers/           # Event handler implementations
-│   ├── effects/                # Effect implementations
+├── app/                        # Application layer
+│   ├── App.tsx                 # Main application component (simple)
+│   ├── Provider.tsx            # Global providers (QueryClient, Theme, etc)
+│   ├── Router.tsx              # Router configuration (all route definitions here, lazy imports only)
+│   ├── events/                 # Cross-feature orchestration (strict scope, see rules below)
+│   │   ├── types.ts            # App-internal Event/Handler input/output types only (references Command from shared/types/commands.ts, doesn't define it)
+│   │   └── handlers/
+│   ├── effects/                # Cross-feature side effects (strict scope, see rules below)
 │   │   ├── analytics.effects.ts
 │   │   └── logging.effects.ts
-│   ├── subs/                   # Cross-feature subscriptions only
-│   │   └── cross-feature.subs.ts
-│   ├── store/                  # Application state (jotai atoms)
-│   │   └── ui.atoms.ts
-│   └── provider.tsx            # Root providers (QueryClient, Router, etc)
+│   └── store/                  # Global application state (jotai atoms)
+│       └── ui.atoms.ts
 │
-├── features/                   # Feature modules (domain-driven, isolated)
-│   ├── auth/                   # ⚠️ Cross-feature domain (OK to import from other features)
-│   │   ├── api/
-│   │   │   └── auth.api.ts
-│   │   ├── components/
-│   │   │   ├── login-form.tsx
-│   │   │   └── protected-route.tsx
-│   │   ├── hooks/
-│   │   │   ├── queries/
-│   │   │   ├── mutations/
-│   │   │   └── keys.ts
-│   │   ├── types/
-│   │   │   └── index.ts
-│   │   └── index.ts            # Public API (controlled exports)
-│   │
-│   ├── settings/               # Domain feature (isolated)
-│   │   ├── api/
-│   │   │   └── settings.api.ts
-│   │   ├── components/
-│   │   │   ├── account-list.tsx
-│   │   │   └── department-form.tsx
-│   │   ├── hooks/
-│   │   │   ├── queries/
-│   │   │   │   ├── use-accounts.ts
-│   │   │   │   └── use-departments.ts
-│   │   │   ├── mutations/
-│   │   │   │   ├── use-add-department.ts
-│   │   │   │   └── use-delete-account.ts
-│   │   │   └── keys.ts
-│   │   ├── types/
-│   │   │   └── index.ts
-│   │   └── index.ts
-│   │
-│   └── dashboard/
-│       └── ...
+├── domains/                    # Cross-cutting domains (importable by features, ESLint allowed)
+│   └── auth/
+│       ├── pages/              # Route entry points
+│       │   └── LoginPage.tsx
+│       ├── ui/                 # Reusable components
+│       │   └── ProtectedRoute.tsx
+│       ├── data/
+│       │   ├── api.ts
+│       │   ├── keys.ts
+│       │   ├── queries.ts
+│       │   └── mutations.ts
+│       ├── model/
+│       │   ├── types.ts
+│       │   └── schemas.ts
+│       └── index.ts            # Public exports (recommended for domains)
 │
-├── components/                 # Shared UI components
-│   ├── ui/                     # Primitives (Button, Card, Input, etc)
-│   │   ├── button.tsx
-│   │   ├── card.tsx
-│   │   └── input.tsx
-│   ├── layout/                 # Layout components (Header, Sidebar, Footer)
-│   │   ├── header.tsx
-│   │   ├── sidebar.tsx
-│   │   └── footer.tsx
-│   └── feedback/               # Feedback components (Spinner, ErrorView, etc)
-│       ├── spinner.tsx
-│       └── error-view.tsx
+├── shared/                     # Shared across all features
+│   ├── ui/                     # Shared UI components
+│   │   ├── Button.tsx          # Primitives
+│   │   ├── Card.tsx
+│   │   ├── Spinner.tsx         # Feedback components
+│   │   ├── ErrorView.tsx
+│   │   └── index.ts            # Barrel exports for convenience
+│   ├── lib/                    # Shared utilities & configurations
+│   │   ├── query-client.ts     # TanStack Query setup
+│   │   ├── http.ts             # httpJson, httpText
+│   │   ├── errors.ts           # ApiError class
+│   │   └── hooks/              # Shared hooks
+│   │       ├── use-toggle.ts
+│   │       └── use-debounce.ts
+│   └── types/                  # Truly shared types only (see guidelines below)
+│       ├── common.ts           # Pagination, ApiResponse<T>, etc
+│       └── commands.ts         # Command pattern types (used by features/domains)
 │
-├── lib/                        # Shared utilities
-│   ├── query-client.ts         # TanStack Query setup + meta augmentation
-│   ├── http.ts                 # httpJson, httpText
-│   ├── errors.ts               # ApiError class
-│   └── hooks/                  # Shared hooks
-│       ├── use-toggle.ts
-│       └── use-debounce.ts
-│
-└── types/                      # Shared types
-    ├── api.ts                  # Common API types
-    └── common.ts               # Common utility types
+└── features/                   # Feature modules (strictly isolated, no cross-import)
+    ├── settings/               # Isolated feature
+    │   ├── pages/              # Route entry points
+    │   │   ├── SettingsPage.tsx
+    │   │   ├── AccountsPage.tsx
+    │   │   └── DepartmentsPage.tsx
+    │   ├── ui/                 # UI components (not pages)
+    │   │   ├── AccountList.tsx
+    │   │   ├── AccountCard.tsx
+    │   │   └── DepartmentForm.tsx
+    │   ├── data/               # Split by resource for proper granularity
+    │   │   ├── accounts/
+    │   │   │   ├── api.ts
+    │   │   │   ├── keys.ts
+    │   │   │   ├── queries.ts
+    │   │   │   └── mutations.ts
+    │   │   └── departments/
+    │   │       ├── api.ts
+    │   │       ├── keys.ts
+    │   │       ├── queries.ts
+    │   │       └── mutations.ts
+    │   ├── model/
+    │   │   └── types.ts
+    │
+    └── dashboard/
+        └── ...
+```
+
+### App Layer (Simple & Clean)
+
+```typescript
+// app/App.tsx (EXAMPLE)
+import { AppProvider } from '@/app/Provider'
+import { AppRouter } from '@/app/Router'
+
+function App() {
+  return (
+    <AppProvider>
+      <AppRouter />
+    </AppProvider>
+  )
+}
+
+export default App
+```
+
+```typescript
+// app/Provider.tsx (EXAMPLE)
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from '@/shared/lib/query-client'
+
+export function AppProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  )
+}
+```
+
+```typescript
+// app/Router.tsx (EXAMPLE)
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
+
+// Lazy load from features/*/pages/ and domains/*/pages/
+const SettingsPage = lazy(() => import('@/features/settings/pages/SettingsPage'))
+const DashboardPage = lazy(() => import('@/features/dashboard/pages/DashboardPage'))
+const LoginPage = lazy(() => import('@/domains/auth/pages/LoginPage'))
+
+export function AppRouter() {
+  return (
+    <BrowserRouter>
+      <Suspense fallback={<div>Loading...</div>}>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
+  )
+}
 ```
 
 ### Placement Rules
 
-**features/[domain]/**:
-- `api/`: API client functions (use `httpJson`/`httpText`)
-- `components/`: Feature-specific components
-- `hooks/queries/`: TanStack Query hooks (read operations)
-- `hooks/mutations/`: TanStack Query mutations (write operations)
-- `hooks/keys.ts`: QueryKey factory
-- `types/`: Feature-specific types
-- `index.ts`: Public API (export only what's needed by other layers)
+**domains/[domain]/** (Cross-cutting domains only):
+- For domains that multiple features depend on (auth, pricing, billing)
+- Importable by features (ESLint exception configured)
+- Same structure as features: `pages/`, `ui/`, `data/`, `model/`, `index.ts`
+- `index.ts`: **Recommended** - export public API for features to import (e.g., `export { useUser } from './data/queries'`)
 
-**Cross-feature exceptions**: `features/auth/`, `features/pricing/`, `features/plan/` can be imported by other features. Alternative: Create `src/domains/` for cross-cutting logic (features can import, but domains cannot import features/app).
+**features/[domain]/** (Isolated features):
+- `pages/`: Route entry points (page components that compose UI)
+  - Examples: `SettingsPage.tsx`, `AccountsPage.tsx`, `DepartmentsPage.tsx`
+  - These are lazy-loaded from `app/Router.tsx`
+  - Contain routing logic, page layout, and UI composition
+- `ui/`: Reusable UI components (NOT pages)
+  - Examples: `AccountList.tsx`, `AccountCard.tsx`, `DepartmentForm.tsx`
+  - Pure presenters or containers without routing logic
+  - Organize by subdirectory when >5 components (e.g., `accounts/`, `departments/`)
+- `data/`: Server cache layer (TanStack Query), split by resource for proper granularity
+  - Structure: `data/<resource>/api.ts`, `data/<resource>/keys.ts`, `data/<resource>/queries.ts`, `data/<resource>/mutations.ts`
+  - Examples: `data/accounts/`, `data/departments/` (API resources, not feature names)
+  - Each resource subdirectory contains its own API client, query keys, queries, and mutations
+  - **Rationale**: Resource-based organization provides consistent structure regardless of project size, improves file discoverability, and prevents individual files from becoming too large
+- `model/`: Feature-local types, schemas, selectors
+  - `types.ts`: Domain types specific to this feature
+  - `schemas.ts`: Zod schemas for validation
+- `index.ts`: ❌ **Prohibited** - features don't cross-import, so barrel exports serve no purpose and create boundary confusion. If sharing is needed: promote to `domains/` (for cross-cutting concerns) or move to `shared/` (for pure UI/types/utils)
 
-**File count guideline**: If a feature has >10 components, consider splitting into subdomains (e.g., `features/settings/accounts/`, `features/settings/departments/`).
+**shared/**:
+- `ui/`: Shared UI components (Button, Card, Spinner, ErrorView)
+  - `index.ts`: Barrel exports for convenience (`export { Button } from './Button'`, etc.)
+  - Import as: `import { Spinner, ErrorView } from '@/shared/ui'`
+- `lib/`: Shared utilities (http, query-client, errors, hooks)
+  - `http.ts`, `query-client.ts`, `errors.ts`
+  - `hooks/`: Shared custom hooks (`use-toggle.ts`, `use-debounce.ts`)
+- `types/`: **Truly shared types ONLY**
+  - `common.ts`: `Pagination`, `ApiResponse<T>`, `SortOrder`, utility types
+  - `commands.ts`: Command pattern types (`Command`, used by features/domains to avoid app layer dependency)
+  - ✅ Allowed: Types used across multiple features/domains
+  - ❌ Prohibited: Feature-specific types, API contract types (keep near data/api)
+  - **Prevent "type graveyard"**: If a type is used by only one feature, keep it in that feature's `model/types.ts`
+
+**Page vs UI Component Decision**:
+- **pages/**: Route entry points with routing context (path params, query params, navigation)
+- **ui/**: Reusable components without routing concerns
+- **Rule**: If it needs `useParams()`, `useNavigate()`, or is directly referenced in `app/Router.tsx`, it goes in `pages/`
+
+**Cross-feature Import Rules** (Enforced via ESLint):
+- ✅ Allowed: `features → domains` (e.g., `import { useUser } from '@/domains/auth'`)
+- ✅ Allowed: `features → shared`, `domains → shared` (e.g., `import type { Command } from '@/shared/types/commands'`)
+- ❌ Prohibited: `features → features` (strict isolation)
+- ❌ Prohibited: `features → app`, `domains → app` (unidirectional codebase)
+- ❌ Prohibited: `shared → features`, `shared → domains` (unidirectional)
+
+**Routing & Navigation (迷子防止)**:
+- URL definitions live in **one place only**: `app/Router.tsx`
+- Route entry points (screens) live in `features/*/pages/` or `domains/*/pages/`
+- Reusable UI components live in `features/*/ui/` or `domains/*/ui/`
+- When adding a new route: define it in `Router.tsx`, create the page component in the appropriate `pages/` directory
+
+### ESLint Configuration (Import Enforcement)
+
+Use `eslint-plugin-import` to enforce architectural boundaries:
+
+```js
+// .eslintrc.js (EXAMPLE)
+module.exports = {
+  rules: {
+    'import/no-restricted-paths': [
+      'error',
+      {
+        zones: [
+          // Prevent features from importing other features (strict isolation)
+          {
+            target: './src/features/settings',
+            from: './src/features',
+            except: ['./settings'],
+          },
+          {
+            target: './src/features/dashboard',
+            from: './src/features',
+            except: ['./dashboard'],
+          },
+          // Add zones when features increase to maintain isolation
+
+          // Allow features → domains (cross-cutting domains are exempt)
+          // No restriction needed here - features CAN import from domains
+
+          // Enforce unidirectional codebase (prevent shared → features/app)
+          {
+            target: [
+              './src/shared/ui',
+              './src/shared/lib',
+              './src/shared/types',
+            ],
+            from: ['./src/features', './src/domains', './src/app'],
+          },
+
+          // Prevent features from importing from app layer
+          {
+            target: './src/features',
+            from: './src/app',
+          },
+
+          // Prevent domains from importing from app layer
+          {
+            target: './src/domains',
+            from: './src/app',
+          },
+        ],
+      },
+    ],
+  },
+}
+```
+
+**Note**: This configuration ensures features remain isolated while allowing controlled dependencies on cross-cutting domains.
+
+### Prohibiting features/index.ts (Barrel Exports)
+
+To enforce the prohibition of `features/*/index.ts` files, use one of these approaches:
+
+**Option A: Ban file existence** (using `eslint-plugin-disallow-filenames`):
+```js
+// .eslintrc.js
+module.exports = {
+  overrides: [
+    {
+      files: ['src/features/*/index.ts', 'src/features/*/index.tsx'],
+      rules: {
+        'disallow-filenames/disallow-filenames': ['error', { message: 'features/index.ts is prohibited. If sharing is needed, promote to domains/ or move to shared/' }]
+      }
+    }
+  ]
+}
+```
+
+**Option B: Ban barrel imports** (using `eslint-plugin-import`):
+```js
+// .eslintrc.js
+module.exports = {
+  rules: {
+    'import/no-restricted-paths': [
+      'error',
+      {
+        zones: [
+          // Existing zones...
+
+          // Prevent barrel imports from features (force explicit imports)
+          {
+            target: './src',
+            from: './src/features/*/index.ts',
+            message: 'Barrel imports from features are prohibited. Import from specific files instead (e.g., @/features/settings/pages/SettingsPage)'
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Rationale**: Features don't cross-import by design, so barrel exports create false boundaries and enable accidental coupling. Explicit imports improve clarity and prevent boundary violations.
 
 ---
 
@@ -182,17 +387,19 @@ Side effects aggregated at: API layer (ApiError normalization), QueryClient (opt
 
 Server state via TanStack Query (required). No `useState + useEffect` for fetching. Use queryKey factories. Reactive updates via `invalidateQueries`.
 
-### 5. Unidirectional Codebase (shared → features → app)
+### 5. Unidirectional Codebase (shared → domains → features → app)
 
-`lib/`, `components/`, `types/` are shared (no feature/app dependencies). `features/` use shared code, cannot import other features (except cross-cutting domains like auth). `app/` composes features.
+`shared/` has no dependencies on other layers. `domains/` depend only on `shared/`. `features/` depend on `shared/` and `domains/` (but not other features). `app/` composes everything.
 
 ```typescript
 // ✅ GOOD
-import { Card } from '@/components/ui/card'
-import { useUser } from '@/features/auth'  // Cross-cutting domain OK
+import { Card } from '@/shared/ui'  // Barrel import from shared/ui
+import { useUser } from '@/domains/auth'  // Cross-cutting domain OK (via index.ts)
+import type { Command } from '@/shared/types/commands'  // Shared types OK
 
 // ❌ BAD
 import { useDashboard } from '@/features/dashboard'  // From another feature (PROHIBITED)
+import type { Command } from '@/app/events/types'  // From app layer (PROHIBITED)
 ```
 
 ---
@@ -214,10 +421,10 @@ import { useDashboard } from '@/features/dashboard'  // From another feature (PR
 **Rationale**: Mutations are explicit user actions (toast appropriate). Queries run in background (toast inappropriate). Success feedback is mutation-specific, so `onSuccess` is the right place.
 
 ```typescript
-// lib/query-client.ts (TypeScript meta augmentation)
+// shared/lib/query-client.ts (TypeScript meta augmentation)
 import { QueryClient, MutationCache } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ApiError } from './errors'
+import { ApiError } from '@/shared/lib/errors'
 
 declare module '@tanstack/react-query' {
   interface Register {
@@ -252,22 +459,22 @@ export const queryClient = new QueryClient({
   },
 })
 
-// features/settings/hooks/mutations/use-add-department.ts (EXAMPLE)
+// features/settings/data/departments/mutations.ts (EXAMPLE - useAddDepartment)
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { settingsApi } from '../../api/settings.api'
-import { settingsKeys } from '../keys'
-import type { Department } from '../../types'
-import type { Command } from '@/app/events/types'
+import { departmentsApi } from '@/features/settings/data/departments/api'
+import { departmentsKeys } from '@/features/settings/data/departments/keys'
+import type { Department } from '@/features/settings/model/types'
+import type { Command } from '@/shared/types/commands'
 
 export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void }) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: settingsApi.addDepartment,
+    mutationFn: departmentsApi.addDepartment,
     meta: { toastError: true },  // Error toast opt-in
     onSuccess: (data: Department) => {
-      queryClient.invalidateQueries({ queryKey: settingsKeys.departments() })
+      queryClient.invalidateQueries({ queryKey: departmentsKeys.list() })
       toast.success('Department added')  // Success toast here
       options?.onCommand?.({ type: 'NAVIGATE', to: `/settings/departments/${data.id}` })
     },
@@ -282,7 +489,7 @@ export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void 
 ### ApiError
 
 ```typescript
-// lib/errors.ts
+// shared/lib/errors.ts
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -303,8 +510,8 @@ export class ApiError extends Error {
 **Usage**: `httpJson` is for JSON request/response only. For FormData/Blob/URLSearchParams, use `fetch()` directly (FormData sets its own Content-Type with boundary).
 
 ```typescript
-// lib/http.ts
-import { ApiError } from './errors'
+// shared/lib/http.ts
+import { ApiError } from '@/shared/lib/errors'
 
 export async function httpJson<T>(
   url: string,
@@ -369,22 +576,28 @@ export async function httpText(url: string, options?: RequestInit): Promise<stri
 ### API Client Example
 
 ```typescript
-// features/settings/api/settings.api.ts (EXAMPLE)
-import { httpJson } from '@/lib/http'
-import type { Account, Department, CreateDepartmentInput } from '../types'
+// features/settings/data/accounts/api.ts (EXAMPLE)
+import { httpJson } from '@/shared/lib/http'
+import type { Account } from '@/features/settings/model/types'
 
-export const settingsApi = {
+export const accountsApi = {
   getAccounts: (signal?: AbortSignal) =>
     httpJson<Account[]>('/api/settings/accounts', { signal }),
 
+  deleteAccount: (id: string) =>
+    httpJson<void>(`/api/settings/accounts/${id}`, { method: 'DELETE' }),
+}
+
+// features/settings/data/departments/api.ts (EXAMPLE)
+import { httpJson } from '@/shared/lib/http'
+import type { Department, CreateDepartmentInput } from '@/features/settings/model/types'
+
+export const departmentsApi = {
   addDepartment: (data: CreateDepartmentInput) =>
     httpJson<Department>('/api/settings/departments', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-
-  deleteAccount: (id: string) =>
-    httpJson<void>(`/api/settings/accounts/${id}`, { method: 'DELETE' }),
 }
 ```
 
@@ -395,27 +608,32 @@ export const settingsApi = {
 ### QueryKey Factory
 
 ```typescript
-// features/settings/hooks/keys.ts (EXAMPLE)
-export const settingsKeys = {
-  all: ['settings'] as const,
-  accounts: () => [...settingsKeys.all, 'accounts'] as const,
-  accountDetail: (id: string) => [...settingsKeys.accounts(), id] as const,
-  departments: () => [...settingsKeys.all, 'departments'] as const,
+// features/settings/data/accounts/keys.ts (EXAMPLE)
+export const accountsKeys = {
+  all: ['settings', 'accounts'] as const,
+  list: () => [...accountsKeys.all, 'list'] as const,
+  detail: (id: string) => [...accountsKeys.all, id] as const,
+}
+
+// features/settings/data/departments/keys.ts (EXAMPLE)
+export const departmentsKeys = {
+  all: ['settings', 'departments'] as const,
+  list: () => [...departmentsKeys.all, 'list'] as const,
 }
 ```
 
 ### Query Hook (No Toast)
 
 ```typescript
-// features/settings/hooks/queries/use-accounts.ts (EXAMPLE)
+// features/settings/data/accounts/queries.ts (EXAMPLE - useAccounts)
 import { useQuery } from '@tanstack/react-query'
-import { settingsApi } from '../../api/settings.api'
-import { settingsKeys } from '../keys'
+import { accountsApi } from '@/features/settings/data/accounts/api'
+import { accountsKeys } from '@/features/settings/data/accounts/keys'
 
 export function useAccounts() {
   return useQuery({
-    queryKey: settingsKeys.accounts(),
-    queryFn: ({ signal }) => settingsApi.getAccounts(signal),
+    queryKey: accountsKeys.list(),
+    queryFn: ({ signal }) => accountsApi.getAccounts(signal),
     // ⚠️ No meta.toastError for queries (background refetch would spam)
   })
 }
@@ -425,8 +643,8 @@ export function useAccounts() {
 
 ```typescript
 const { data: activeAccounts } = useQuery({
-  queryKey: settingsKeys.accounts(),
-  queryFn: ({ signal }) => settingsApi.getAccounts(signal),
+  queryKey: accountsKeys.list(),
+  queryFn: ({ signal }) => accountsApi.getAccounts(signal),
   select: (accounts) => accounts.filter(a => a.status === 'active'),
 })
 ```
@@ -438,32 +656,32 @@ const { data: activeAccounts } = useQuery({
 **Optimistic UX**: Use `setQueryData` for immediate feedback (e.g., list operations where stale data is acceptable).
 
 ```typescript
-// features/settings/hooks/mutations/use-delete-account.ts (EXAMPLE)
+// features/settings/data/accounts/mutations.ts (EXAMPLE - useDeleteAccount)
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { settingsApi } from '../../api/settings.api'
-import { settingsKeys } from '../keys'
-import type { Account } from '../../types'
+import { accountsApi } from '@/features/settings/data/accounts/api'
+import { accountsKeys } from '@/features/settings/data/accounts/keys'
+import type { Account } from '@/features/settings/model/types'
 
 export function useDeleteAccount() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: settingsApi.deleteAccount,
+    mutationFn: accountsApi.deleteAccount,
     onMutate: async (id: string) => {
-      await queryClient.cancelQueries({ queryKey: settingsKeys.accounts() })
-      const previous = queryClient.getQueryData<Account[]>(settingsKeys.accounts())
-      queryClient.setQueryData<Account[]>(settingsKeys.accounts(), (old = []) =>
+      await queryClient.cancelQueries({ queryKey: accountsKeys.list() })
+      const previous = queryClient.getQueryData<Account[]>(accountsKeys.list())
+      queryClient.setQueryData<Account[]>(accountsKeys.list(), (old = []) =>
         old.filter(a => a.id !== id)
       )
       return { previous }
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(settingsKeys.accounts(), context.previous)
+        queryClient.setQueryData(accountsKeys.list(), context.previous)
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: settingsKeys.accounts() })
+      queryClient.invalidateQueries({ queryKey: accountsKeys.list() })
     },
   })
 }
@@ -487,15 +705,40 @@ export function useDeleteAccount() {
 - Want testable, isolated effect implementations
 - Need to decouple from router (testability)
 
+### app/events and app/effects Scope Rules
+
+**⚠️ PRINCIPLE: Single-feature logic MUST stay in feature hooks by default.**
+
+**Allowed Responsibilities (Cross-feature Only)**:
+- Workflows spanning multiple features (e.g., "create account → assign to department → send notification")
+- Analytics/logging that aggregates data from multiple features
+- Complex error handling requiring coordination across features
+- Global side effects (e.g., WebSocket reconnection affecting multiple features)
+- Navigation orchestration when multiple features are involved
+
+**Prohibited Responsibilities**:
+- Single-feature API calls (use feature `mutations.ts` instead)
+- Simple CRUD operations within one feature (use feature hooks)
+- Feature-specific state updates (use feature hooks or jotai atoms)
+- UI-only logic that doesn't coordinate across features
+- Server state invalidation for single features (use `queryClient.invalidateQueries` in mutation callbacks)
+
+**Rationale**: `app/events` and `app/effects` are for cross-cutting concerns only. Keeping single-feature logic in feature hooks maintains feature isolation, improves testability, and prevents the app layer from becoming a dumping ground for arbitrary logic.
+
 ### Command Pattern (Navigation)
 
 ```typescript
-// app/events/types.ts (EXAMPLE)
+// shared/types/commands.ts (EXAMPLE)
 export type Command =
   | { type: 'NAVIGATE'; to: string }
   | { type: 'INVALIDATE_QUERY'; queryKey: unknown[] }
 
-// app/routes/settings/create-department.tsx (EXAMPLE)
+// features/settings/pages/CreateDepartmentPage.tsx (EXAMPLE)
+import { useNavigate } from 'react-router-dom'
+import { useAddDepartment } from '@/features/settings/data/departments/mutations'
+import { CreateDepartmentForm } from '@/features/settings/ui/CreateDepartmentForm'
+import type { Command } from '@/shared/types/commands'
+
 export function CreateDepartmentPage() {
   const navigate = useNavigate()
   const { mutate } = useAddDepartment({
@@ -521,7 +764,8 @@ export const analyticsEffects = {
 ### Cross-feature Subscriptions
 
 ```typescript
-// app/subs/cross-feature.subs.ts (EXAMPLE)
+// app/store/cross-feature-hooks.ts (EXAMPLE - for derived data spanning features)
+// Alternative naming: app/subscriptions/ for Re-frame alignment
 export function useAccountsWithStats() {
   const { data: accounts } = useAccounts()
   const { data: stats } = useDashboardStats()
@@ -564,7 +808,11 @@ export const isDarkModeAtom = atom((get) => get(themeAtom) === 'dark')
 ### Container / Presenter
 
 ```typescript
-// features/settings/components/AccountList.tsx (EXAMPLE)
+// features/settings/ui/AccountList.tsx (EXAMPLE)
+import { useAccounts } from '@/features/settings/data/accounts/queries'
+import { useDeleteAccount } from '@/features/settings/data/accounts/mutations'
+import { Spinner, ErrorView } from '@/shared/ui'
+import type { Account } from '@/features/settings/model/types'
 
 // Container: Subscribe + wire events
 export function AccountListContainer() {
@@ -787,8 +1035,8 @@ function Container() {
 ```typescript
 import { lazy, Suspense } from 'react'
 
-const Dashboard = lazy(() => import('./routes/Dashboard'))
-const Settings = lazy(() => import('./routes/Settings'))
+const Dashboard = lazy(() => import('@/features/dashboard/pages/DashboardPage'))
+const Settings = lazy(() => import('@/features/settings/pages/SettingsPage'))
 
 function App() {
   return (
@@ -808,10 +1056,10 @@ function App() {
 import { lazy, Suspense } from 'react'
 
 // ❌ BAD: Monaco bundles with main chunk (~300KB)
-import { MonacoEditor } from './monaco-editor'
+import { MonacoEditor } from '@/components/MonacoEditor'
 
 // ✅ GOOD: Monaco loads on demand
-const MonacoEditor = lazy(() => import('./monaco-editor').then(m => ({ default: m.MonacoEditor })))
+const MonacoEditor = lazy(() => import('@/components/MonacoEditor').then(m => ({ default: m.MonacoEditor })))
 
 function CodePanel({ code }: { code: string }) {
   return (
@@ -831,7 +1079,7 @@ function CodePanel({ code }: { code: string }) {
 ### Authentication (HttpOnly Cookies + CSRF)
 
 ```typescript
-// lib/auth.tsx (EXAMPLE)
+// shared/lib/auth.tsx (EXAMPLE)
 const getUser = async () => {
   const res = await fetch('/api/auth/me')  // Token via HttpOnly cookie
   if (!res.ok) return null
@@ -854,7 +1102,7 @@ export const userQueryOptions = queryOptions({
 **⚠️ Server-Side Validation Required**: UI authorization checks (like `<Authorization>` component) are for UX only. The server MUST validate all permissions for every request—never trust client-side checks.
 
 ```typescript
-// lib/authorization.tsx (EXAMPLE)
+// shared/lib/authorization.tsx (EXAMPLE)
 export function Authorization({ allowedRoles, policyCheck, children }: AuthorizationProps) {
   const { data: user } = useUser()
   if (!user) return null
@@ -888,7 +1136,11 @@ export function MDPreview({ content }: { content: string }) {
 **Tools**: Vitest, Testing Library, Playwright, MSW.
 
 ```typescript
-// features/settings/components/__tests__/account-list.test.tsx (EXAMPLE)
+// features/settings/ui/__tests__/AccountList.test.tsx (EXAMPLE)
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { AccountListContainer } from '@/features/settings/ui/AccountList'
+
 test('deletes account on click', async () => {
   render(<AccountListContainer />)
   await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument())
@@ -902,13 +1154,15 @@ test('deletes account on click', async () => {
 ## Project Standards
 
 - **ESLint + Prettier + TypeScript + Husky**: Code quality, formatting, type safety, pre-commit hooks
-- **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/components/ui/card'`)
-- **File Naming**: kebab-case (`account-list.tsx`), enforce with ESLint `check-file` plugin
+- **Absolute Imports**: `@/*` in tsconfig (`import { Card } from '@/shared/ui'`)
+- **File Naming**:
+  - **Component files (.tsx)**: PascalCase (`AccountList.tsx`, `Button.tsx`, `LoginPage.tsx`)
+  - **Non-component files (.ts)**: kebab-case (`api.ts`, `keys.ts`, `queries.ts`, `mutations.ts`, `use-toggle.ts`)
+  - Enforce with ESLint `check-file` plugin
 - **File Size**: Target 100-200 lines, max 400 lines per `.ts`/`.tsx` file for readability
   - **If exceeding 400 lines**:
     - Components: Split into Container/Presenter or extract sub-components
-    - Hooks: Split queries/mutations into separate files
-    - API clients: Split by resource (e.g., `accounts.api.ts`, `departments.api.ts`)
+    - Data layer: Already organized by resource in `data/<resource>/` (api.ts, keys.ts, queries.ts, mutations.ts)
     - Utils: Split by responsibility (e.g., `date.utils.ts`, `string.utils.ts`)
 
 ---
