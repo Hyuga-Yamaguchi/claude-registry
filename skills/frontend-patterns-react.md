@@ -59,7 +59,7 @@ src/
 │   ├── Provider.tsx            # Global providers (QueryClient, Theme, etc)
 │   ├── Router.tsx              # Router configuration (all route definitions here, lazy imports only)
 │   ├── events/                 # Cross-feature orchestration (strict scope, see rules below)
-│   │   ├── types.ts
+│   │   ├── types.ts            # App-specific event types (Command lives in shared/types/commands.ts)
 │   │   └── handlers/
 │   ├── effects/                # Cross-feature side effects (strict scope, see rules below)
 │   │   ├── analytics.effects.ts
@@ -81,14 +81,15 @@ src/
 │       ├── model/
 │       │   ├── types.ts
 │       │   └── schemas.ts
-│       └── index.ts            # Public exports
+│       └── index.ts            # Public exports (recommended for domains)
 │
 ├── shared/                     # Shared across all features
 │   ├── ui/                     # Shared UI components
 │   │   ├── Button.tsx          # Primitives
 │   │   ├── Card.tsx
 │   │   ├── Spinner.tsx         # Feedback components
-│   │   └── ErrorView.tsx
+│   │   ├── ErrorView.tsx
+│   │   └── index.ts            # Barrel exports for convenience
 │   ├── lib/                    # Shared utilities & configurations
 │   │   ├── query-client.ts     # TanStack Query setup
 │   │   ├── http.ts             # httpJson, httpText
@@ -97,7 +98,8 @@ src/
 │   │       ├── use-toggle.ts
 │   │       └── use-debounce.ts
 │   └── types/                  # Truly shared types only (see guidelines below)
-│       └── common.ts           # Pagination, ApiResponse<T>, etc
+│       ├── common.ts           # Pagination, ApiResponse<T>, etc
+│       └── commands.ts         # Command pattern types (used by features/domains)
 │
 └── features/                   # Feature modules (strictly isolated, no cross-import)
     ├── settings/               # Isolated feature
@@ -122,7 +124,7 @@ src/
     │   │       └── mutations.ts
     │   ├── model/
     │   │   └── types.ts
-    │   └── index.ts
+    │   └── index.ts            # Rarely needed (features don't cross-import)
     │
     └── dashboard/
         └── ...
@@ -191,6 +193,7 @@ export function AppRouter() {
 - For domains that multiple features depend on (auth, pricing, billing)
 - Importable by features (ESLint exception configured)
 - Same structure as features: `pages/`, `ui/`, `data/`, `model/`, `index.ts`
+- `index.ts`: **Recommended** - export public API for features to import (e.g., `export { useUser } from './data/queries'`)
 
 **features/[domain]/** (Isolated features):
 - `pages/`: Route entry points (page components that compose UI)
@@ -209,15 +212,19 @@ export function AppRouter() {
 - `model/`: Feature-local types, schemas, selectors
   - `types.ts`: Domain types specific to this feature
   - `schemas.ts`: Zod schemas for validation
-- `index.ts`: Public API (minimal exports, avoid if possible)
+- `index.ts`: **Rarely needed** - features don't cross-import, so public API is unnecessary (only create for testing utilities if needed)
 
 **shared/**:
 - `ui/`: Shared UI components (Button, Card, Spinner, ErrorView)
+  - `index.ts`: Barrel exports for convenience (`export { Button } from './Button'`, etc.)
+  - Import as: `import { Spinner, ErrorView } from '@/shared/ui'`
 - `lib/`: Shared utilities (http, query-client, errors, hooks)
   - `http.ts`, `query-client.ts`, `errors.ts`
   - `hooks/`: Shared custom hooks (`use-toggle.ts`, `use-debounce.ts`)
 - `types/`: **Truly shared types ONLY**
-  - ✅ Allowed: `Pagination`, `ApiResponse<T>`, `SortOrder`, utility types
+  - `common.ts`: `Pagination`, `ApiResponse<T>`, `SortOrder`, utility types
+  - `commands.ts`: Command pattern types (`Command`, used by features/domains to avoid app layer dependency)
+  - ✅ Allowed: Types used across multiple features/domains
   - ❌ Prohibited: Feature-specific types, API contract types (keep near data/api)
   - **Prevent "type graveyard"**: If a type is used by only one feature, keep it in that feature's `model/types.ts`
 
@@ -228,8 +235,9 @@ export function AppRouter() {
 
 **Cross-feature Import Rules** (Enforced via ESLint):
 - ✅ Allowed: `features → domains` (e.g., `import { useUser } from '@/domains/auth'`)
-- ✅ Allowed: `features → shared`, `domains → shared`
+- ✅ Allowed: `features → shared`, `domains → shared` (e.g., `import type { Command } from '@/shared/types/commands'`)
 - ❌ Prohibited: `features → features` (strict isolation)
+- ❌ Prohibited: `features → app`, `domains → app` (unidirectional codebase)
 - ❌ Prohibited: `shared → features`, `shared → domains` (unidirectional)
 
 **Routing & Navigation (迷子防止)**:
@@ -342,10 +350,12 @@ Server state via TanStack Query (required). No `useState + useEffect` for fetchi
 ```typescript
 // ✅ GOOD
 import { Card } from '@/shared/ui/Card'
-import { useUser } from '@/domains/auth'  // Cross-cutting domain OK
+import { useUser } from '@/domains/auth'  // Cross-cutting domain OK (via index.ts)
+import type { Command } from '@/shared/types/commands'  // Shared types OK
 
 // ❌ BAD
 import { useDashboard } from '@/features/dashboard'  // From another feature (PROHIBITED)
+import type { Command } from '@/app/events/types'  // From app layer (PROHIBITED)
 ```
 
 ---
@@ -411,7 +421,7 @@ import { toast } from 'sonner'
 import { departmentsApi } from '@/features/settings/data/departments/api'
 import { departmentsKeys } from '@/features/settings/data/departments/keys'
 import type { Department } from '@/features/settings/model/types'
-import type { Command } from '@/app/events/types'
+import type { Command } from '@/shared/types/commands'
 
 export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void }) {
   const queryClient = useQueryClient()
@@ -674,7 +684,7 @@ export function useDeleteAccount() {
 ### Command Pattern (Navigation)
 
 ```typescript
-// app/events/types.ts (EXAMPLE)
+// shared/types/commands.ts (EXAMPLE)
 export type Command =
   | { type: 'NAVIGATE'; to: string }
   | { type: 'INVALIDATE_QUERY'; queryKey: unknown[] }
@@ -683,6 +693,7 @@ export type Command =
 import { useNavigate } from 'react-router-dom'
 import { useAddDepartment } from '@/features/settings/data/departments/mutations'
 import { CreateDepartmentForm } from '@/features/settings/ui/CreateDepartmentForm'
+import type { Command } from '@/shared/types/commands'
 
 export function CreateDepartmentPage() {
   const navigate = useNavigate()
