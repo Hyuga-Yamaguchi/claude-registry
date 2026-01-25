@@ -57,10 +57,7 @@ src/
 ├── app/                        # Application layer
 │   ├── App.tsx                 # Main application component (simple)
 │   ├── Provider.tsx            # Global providers (QueryClient, Theme, etc)
-│   ├── Router.tsx              # Router configuration (lazy imports only)
-│   ├── routes/                 # Route entry points (thin, lazy load from features/domains pages)
-│   │   ├── settings.tsx
-│   │   └── dashboard.tsx
+│   ├── Router.tsx              # Router configuration (all route definitions here, lazy imports only)
 │   ├── events/                 # Cross-feature orchestration (strict scope, see rules below)
 │   │   ├── types.ts
 │   │   └── handlers/
@@ -203,7 +200,7 @@ export function AppRouter() {
 **features/[domain]/** (Isolated features):
 - `pages/`: Route entry points (page components that compose UI)
   - Examples: `SettingsPage.tsx`, `AccountsPage.tsx`, `DepartmentsPage.tsx`
-  - These are lazy-loaded from `app/routes/`
+  - These are lazy-loaded from `app/Router.tsx`
   - Contain routing logic, page layout, and UI composition
 - `ui/`: Reusable UI components (NOT pages)
   - Examples: `AccountList.tsx`, `AccountCard.tsx`, `DepartmentForm.tsx`
@@ -236,13 +233,19 @@ export function AppRouter() {
 **Page vs UI Component Decision**:
 - **pages/**: Route entry points with routing context (path params, query params, navigation)
 - **ui/**: Reusable components without routing concerns
-- **Rule**: If it needs `useParams()`, `useNavigate()`, or is directly referenced in `app/routes/`, it goes in `pages/`
+- **Rule**: If it needs `useParams()`, `useNavigate()`, or is directly referenced in `app/Router.tsx`, it goes in `pages/`
 
 **Cross-feature Import Rules** (Enforced via ESLint):
 - ✅ Allowed: `features → domains` (e.g., `import { useUser } from '@/domains/auth'`)
 - ✅ Allowed: `features → shared`, `domains → shared`
 - ❌ Prohibited: `features → features` (strict isolation)
 - ❌ Prohibited: `shared → features`, `shared → domains` (unidirectional)
+
+**Routing & Navigation (迷子防止)**:
+- URL definitions live in **one place only**: `app/Router.tsx`
+- Route entry points (screens) live in `features/*/pages/` or `domains/*/pages/`
+- Reusable UI components live in `features/*/ui/` or `domains/*/ui/`
+- When adding a new route: define it in `Router.tsx`, create the page component in the appropriate `pages/` directory
 
 ### ESLint Configuration (Import Enforcement)
 
