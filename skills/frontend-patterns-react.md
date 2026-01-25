@@ -59,7 +59,7 @@ src/
 │   ├── Provider.tsx            # Global providers (QueryClient, Theme, etc)
 │   ├── Router.tsx              # Router configuration (all route definitions here, lazy imports only)
 │   ├── events/                 # Cross-feature orchestration (strict scope, see rules below)
-│   │   ├── types.ts            # App-specific event types (Command lives in shared/types/commands.ts)
+│   │   ├── types.ts            # App-internal Event/Handler input/output types only (references Command from shared/types/commands.ts, doesn't define it)
 │   │   └── handlers/
 │   ├── effects/                # Cross-feature side effects (strict scope, see rules below)
 │   │   ├── analytics.effects.ts
@@ -124,7 +124,6 @@ src/
     │   │       └── mutations.ts
     │   ├── model/
     │   │   └── types.ts
-    │   └── index.ts            # Rarely needed (features don't cross-import)
     │
     └── dashboard/
         └── ...
@@ -212,7 +211,7 @@ export function AppRouter() {
 - `model/`: Feature-local types, schemas, selectors
   - `types.ts`: Domain types specific to this feature
   - `schemas.ts`: Zod schemas for validation
-- `index.ts`: **Rarely needed** - features don't cross-import, so public API is unnecessary (only create for testing utilities if needed)
+- `index.ts`: ❌ **Prohibited** - features don't cross-import, so barrel exports serve no purpose and create boundary confusion. If sharing is needed: promote to `domains/` (for cross-cutting concerns) or move to `shared/` (for pure UI/types/utils)
 
 **shared/**:
 - `ui/`: Shared UI components (Button, Card, Spinner, ErrorView)
@@ -269,7 +268,7 @@ module.exports = {
             from: './src/features',
             except: ['./dashboard'],
           },
-          // Add more features as needed...
+          // Add zones when features increase to maintain isolation
 
           // Allow features → domains (cross-cutting domains are exempt)
           // No restriction needed here - features CAN import from domains
@@ -303,6 +302,51 @@ module.exports = {
 ```
 
 **Note**: This configuration ensures features remain isolated while allowing controlled dependencies on cross-cutting domains.
+
+### Prohibiting features/index.ts (Barrel Exports)
+
+To enforce the prohibition of `features/*/index.ts` files, use one of these approaches:
+
+**Option A: Ban file existence** (using `eslint-plugin-disallow-filenames`):
+```js
+// .eslintrc.js
+module.exports = {
+  overrides: [
+    {
+      files: ['src/features/*/index.ts', 'src/features/*/index.tsx'],
+      rules: {
+        'disallow-filenames/disallow-filenames': ['error', { message: 'features/index.ts is prohibited. If sharing is needed, promote to domains/ or move to shared/' }]
+      }
+    }
+  ]
+}
+```
+
+**Option B: Ban barrel imports** (using `eslint-plugin-import`):
+```js
+// .eslintrc.js
+module.exports = {
+  rules: {
+    'import/no-restricted-paths': [
+      'error',
+      {
+        zones: [
+          // Existing zones...
+
+          // Prevent barrel imports from features (force explicit imports)
+          {
+            target: './src',
+            from: './src/features/*/index.ts',
+            message: 'Barrel imports from features are prohibited. Import from specific files instead (e.g., @/features/settings/pages/SettingsPage)'
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Rationale**: Features don't cross-import by design, so barrel exports create false boundaries and enable accidental coupling. Explicit imports improve clarity and prevent boundary violations.
 
 ---
 
@@ -721,6 +765,7 @@ export const analyticsEffects = {
 
 ```typescript
 // app/store/cross-feature-hooks.ts (EXAMPLE - for derived data spanning features)
+// Alternative naming: app/subscriptions/ for Re-frame alignment
 export function useAccountsWithStats() {
   const { data: accounts } = useAccounts()
   const { data: stats } = useDashboardStats()
