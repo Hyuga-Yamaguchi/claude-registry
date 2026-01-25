@@ -236,6 +236,7 @@ export function AppRouter() {
   - **Page layout**: Overall page structure and composition
   - **Keep thin**: Primarily component composition and routing logic. Avoid business logic, complex state management, or data transformations
   - **Directly referenced** in `app/Router.tsx` for lazy loading
+  - ❌ **Prohibit early returns** in pages: Keep page structure visible by using conditional rendering in JSX instead of early returns. This prevents layout duplication and keeps the overall page structure clear.
 - **components/**: Reusable components without routing concerns
   - Pure presenters or containers
   - No routing hooks (`useParams`, `useNavigate`, `useSearchParams`)
@@ -813,6 +814,83 @@ export const isDarkModeAtom = atom((get) => get(themeAtom) === 'dark')
 ---
 
 ## Component Patterns
+
+### Page Patterns
+
+**Prohibit early returns in pages** to keep page structure visible and prevent layout duplication.
+
+**❌ BAD: Early returns cause layout duplication**
+
+```typescript
+export function UserEditPage() {
+  const { id } = useParams<{ id: string }>()
+  const { data: user, isLoading } = useAccount(id)
+
+  // Layout duplicated in early returns
+  if (isLoading) {
+    return (
+      <MainLayout>
+        <div className="flex h-full items-center justify-center">
+          <div className="text-muted-foreground">読み込み中...</div>
+        </div>
+      </MainLayout>
+    )
+  }
+
+  if (!user) {
+    return <Navigate to="/account-management/users" replace />
+  }
+
+  return (
+    <Authorization allowedRoles={['somu']}>
+      <MainLayout>
+        <div className="flex h-full flex-col">
+          <PageHeader title="ユーザー編集" />
+          <div className="flex-1 overflow-auto px-6 py-4">
+            <UserEditForm user={user} />
+          </div>
+        </div>
+      </MainLayout>
+    </Authorization>
+  )
+}
+```
+
+**✅ GOOD: Conditional rendering keeps structure clear**
+
+```typescript
+export function UserEditPage() {
+  const { id } = useParams<{ id: string }>()
+  const { data: user, isLoading } = useAccount(id)
+
+  return (
+    <Authorization allowedRoles={['somu']}>
+      <MainLayout>
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center">
+            <div className="text-muted-foreground">読み込み中...</div>
+          </div>
+        ) : !user ? (
+          <Navigate to="/account-management/users" replace />
+        ) : (
+          <div className="flex h-full flex-col">
+            <PageHeader title="ユーザー編集" />
+            <div className="flex-1 overflow-auto px-6 py-4">
+              <UserEditForm user={user} />
+            </div>
+          </div>
+        )}
+      </MainLayout>
+    </Authorization>
+  )
+}
+```
+
+**Benefits**:
+- Page structure (Authorization, MainLayout) visible at a glance
+- No layout duplication
+- Easier to maintain and refactor
+- Aligns with "keep pages thin" principle
 
 ### Container / Presenter
 
