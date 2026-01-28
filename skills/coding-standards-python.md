@@ -18,6 +18,8 @@ Production-ready standards for Python 3.11+ with functional programming principl
 **Pure Function**: Same input → same output, no side effects.
 
 ```python
+from decimal import Decimal
+
 # ✅ Pure: deterministic and testable
 def calculate_discount(price: Decimal, rate: Decimal) -> Decimal:
     return price * (Decimal("1") - rate)
@@ -41,7 +43,6 @@ Use `frozen=True` and immutable collections for domain models to prevent acciden
 ```python
 from dataclasses import dataclass, replace
 from decimal import Decimal
-from typing import Sequence
 
 # ✅ Domain model: immutable with immutable collections
 @dataclass(frozen=True)
@@ -62,7 +63,13 @@ class Order:
     items: tuple["OrderItem", ...]  # Immutable collection
     user_id: str
 
-# Return new instances using dataclasses.replace()
+@dataclass(frozen=True)
+class OrderItem:
+    product_id: str
+    quantity: int
+    unit_price: Decimal
+
+# Return new instances using replace()
 def update_name(user: User, new_name: str) -> User:
     return replace(user, name=new_name)
 
@@ -71,22 +78,27 @@ def add_tag(user: User, tag: str) -> User:
 ```
 
 **Immutable collections policy**:
-- **Domain models**: Use `tuple` for sequences, `frozenset` for sets, immutable mappings
+- **Domain models**: Use `tuple` for sequences, `frozenset` for sets
 - **DTOs/configs**: Allow `list`/`dict` where mutation is expected (e.g., Pydantic models)
-- **Local scope**: Mutable collections OK if never exposed outside function
-- **Type hints**: Use `Sequence[T]` for read-only access, `tuple[T, ...]` for owned data
+- **Local scope**: Mutable collections OK if never exposed outside function (see note below)
+- **Type hints**: Use `Sequence[T]` for read-only parameters, `tuple[T, ...]` for owned data
+
+**Local mutability exception**: Pure functions may use mutable local variables (e.g., `results: list[str] = []`) as long as they're never exposed outside the function. This is a practical trade-off for readability—the function remains pure from the caller's perspective.
 
 ```python
-# ✅ Immutable collections in domain
-@dataclass(frozen=True)
-class ShoppingCart:
-    items: tuple[Item, ...]
-    applied_coupons: frozenset[str]
-    metadata: tuple[tuple[str, str], ...]  # For key-value pairs
+from typing import Sequence
 
-# ✅ Mutable collections in DTOs (Pydantic)
-class CreateCartRequest(BaseModel):
-    items: list[ItemInput]  # OK: validated input
+# ✅ Pure function with mutable local (not exposed)
+def filter_adults(users: Sequence[User]) -> tuple[User, ...]:
+    results: list[User] = []  # Local mutable: OK
+    for user in users:
+        if user.age >= 18:
+            results.append(user)
+    return tuple(results)  # Converted to immutable before returning
+
+# ✅ Alternative: comprehension (preferred when simple)
+def filter_adults(users: Sequence[User]) -> tuple[User, ...]:
+    return tuple(user for user in users if user.age >= 18)
 ```
 
 ### 3. Expressions Over Statements
@@ -113,6 +125,8 @@ Use ternary expressions, comprehensions, and pattern matching to minimize mutabl
 **Default choice**: Use comprehensions for transformations and filtering.
 
 ```python
+from decimal import Decimal
+
 # ✅ List comprehension (clear and Pythonic)
 discounted = [price * Decimal("0.9") for price in prices]
 adults = [user for user in users if user.age >= 18]
@@ -128,6 +142,7 @@ Use `map()` and `filter()` when passing functions as arguments or for lazy evalu
 
 ```python
 from operator import attrgetter
+from typing import Sequence
 
 # ✅ map with function reference
 prices = tuple(map(attrgetter("price"), items))
@@ -138,25 +153,33 @@ def is_active(user: User) -> bool:
 
 active_users = tuple(filter(is_active, users))
 
-# ❌ Avoid map/filter with lambda (use comprehension)
-prices = tuple(item.price for item in items)  # Better
+# ❌ Avoid map/filter with lambda (use comprehension instead)
+prices = tuple(item.price for item in items)  # Better than map(lambda i: i.price, items)
 ```
 
-### Reduce for Aggregation
+### Reduce for Aggregation (Last Resort)
 
-Prefer built-in aggregators (`sum`, `any`, `all`, `min`, `max`). Use `reduce` for custom aggregation.
+**Prefer built-in aggregators** (`sum`, `any`, `all`, `min`, `max`). Use `reduce` only when no built-in alternative exists.
 
 ```python
 from functools import reduce
 from operator import or_
 
-# ✅ Built-in aggregators
+# ✅ Built-in aggregators (preferred)
 total = sum(item.price for item in items)
 has_errors = any(r.is_error for r in results)
 
-# ✅ reduce for custom aggregation (merging sets)
-all_permissions = reduce(or_, (user.permissions for user in users), frozenset())
+# ✅ Prefer built-in methods over reduce
+all_permissions: frozenset[str] = frozenset().union(
+    *(user.permissions for user in users)
+)
+
+# ⚠️ reduce only when necessary (no built-in alternative)
+from operator import mul
+factorial = reduce(mul, range(1, n + 1), 1)
 ```
+
+**Why avoid reduce**: Less readable than comprehensions or built-in methods. Use only when you genuinely need custom aggregation logic.
 
 ### For Loops: Practical Guidelines
 
@@ -166,10 +189,15 @@ all_permissions = reduce(or_, (user.permissions for user in users), frozenset())
 - Complex multi-step logic
 
 ```python
+from decimal import Decimal
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ✅ Side effects: for loop is appropriate
 for user in users:
     logger.info("Processing user %s", user.id)
-    send_email(user.email, template)
+    send_notification(user.email)
 
 # ✅ Comprehension for pure transformation
 validated = tuple(validate_user(u) for u in users)
@@ -185,7 +213,7 @@ for item in items:
         results.append({"price": item.price, "tax": Decimal("0")})
 
 # If this becomes unreadable, extract a function:
-def calculate_pricing(item: Item) -> dict[str, Decimal]:
+def calculate_pricing(item: OrderItem) -> dict[str, Decimal]:
     if item.price > Decimal("100"):
         discounted = item.price * Decimal("0.9")
         return {"price": discounted, "tax": discounted * Decimal("0.1")}
@@ -205,6 +233,8 @@ results = [calculate_pricing(item) for item in items]
 Reduce nesting with early returns for validation and error cases.
 
 ```python
+from decimal import Decimal
+
 def process_order(order: Order | None) -> dict[str, str]:
     if order is None:
         raise ValueError("Order not found")
@@ -233,9 +263,10 @@ class Success:
 class Error:
     message: str
 
-Result: TypeAlias = Success | Error
+# Specific type alias for this use case
+StatusResult: TypeAlias = Success | Error
 
-def handle_result(result: Result) -> str:
+def handle_result(result: StatusResult) -> str:
     match result:
         case Success(value):
             return f"Success: {value}"
@@ -248,23 +279,25 @@ def handle_result(result: Result) -> str:
 Use generators for large datasets and infinite sequences.
 
 ```python
-from typing import Iterator
-from collections.abc import Iterator as ABCIterator
+from collections.abc import Iterator
 
 def read_large_file(path: str) -> Iterator[dict[str, str]]:
     """Process file lazily without loading into memory."""
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
-            yield parse_line(line)
+            # In real code, parse_line would be defined
+            yield {"line": line.strip()}
 
 # Consume lazily
 for record in read_large_file("data.jsonl"):
-    process(record)
+    process_record(record)
 
 # Or use itertools
 from itertools import islice
 first_10 = list(islice(read_large_file("data.jsonl"), 10))
 ```
+
+**Note**: Use `collections.abc.Iterator` (not `typing.Iterator`) for Python 3.11+.
 
 ---
 
@@ -309,7 +342,6 @@ Pure functions and immutable domain models. **No I/O, no logging, no framework d
 # domain/models.py
 from dataclasses import dataclass, replace
 from decimal import Decimal
-from typing import Sequence
 
 @dataclass(frozen=True)
 class OrderItem:
@@ -343,8 +375,11 @@ def apply_discount(order: Order, rate: Decimal) -> Order:
     return replace(order, items=discounted_items)
 
 def validate_order(order: Order) -> tuple[Order, tuple[str, ...]]:
-    """Pure validation: returns order and error messages."""
-    errors: list[str] = []
+    """Pure validation: returns order and error messages.
+
+    Note: Local mutable (errors) is OK—never exposed outside function.
+    """
+    errors: list[str] = []  # Local mutable: allowed
 
     if not order.items:
         errors.append("Order must have at least one item")
@@ -352,13 +387,14 @@ def validate_order(order: Order) -> tuple[Order, tuple[str, ...]]:
     if order.total <= Decimal("0"):
         errors.append("Order total must be positive")
 
-    return order, tuple(errors)
+    return order, tuple(errors)  # Converted to immutable
 ```
 
 **Domain layer rules**:
 - ✅ Pure functions only
 - ✅ Immutable models (`frozen=True`, `tuple`, `frozenset`)
 - ✅ Use `Decimal` for all monetary values
+- ✅ Local mutable variables OK (if never exposed)
 - ❌ No logging (not even logger.debug)
 - ❌ No I/O (files, DB, network)
 - ❌ No framework dependencies (FastAPI, Django, etc.)
@@ -373,6 +409,7 @@ Database access, external APIs, file I/O. Implements interfaces defined by domai
 from typing import Protocol
 from domain.models import Order
 
+# Protocol for dependency inversion
 class OrderRepository(Protocol):
     """Protocol defines interface (structural subtyping).
 
@@ -384,38 +421,32 @@ class OrderRepository(Protocol):
     def get(self, order_id: str) -> Order | None: ...
     def save(self, order: Order) -> None: ...
 
+# Concrete implementation (example sketch)
 class PostgresOrderRepository:
     """Infrastructure implementation with side effects."""
 
-    def __init__(self, conn: Connection):
-        self._conn = conn
+    def __init__(self, connection_string: str):
+        # In production, use connection pool
+        self._conn_string = connection_string
 
     def get(self, order_id: str) -> Order | None:
-        # Database access (side effect)
-        row = self._conn.execute(
-            "SELECT * FROM orders WHERE id = %s", [order_id]
-        ).fetchone()
-
-        if row is None:
-            return None
-
-        return self._parse_order(row)
+        # Pseudo-code: Database access (side effect)
+        # row = execute_query("SELECT * FROM orders WHERE id = %s", [order_id])
+        # if row is None:
+        #     return None
+        # return self._parse_order(row)
+        ...
 
     def save(self, order: Order) -> None:
-        # Database mutation (side effect)
-        self._conn.execute(
-            "INSERT INTO orders (id, items, total) VALUES (%s, %s, %s)",
-            [order.id, self._serialize_items(order.items), str(order.total)]
-        )
-
-    def _parse_order(self, row: Row) -> Order:
-        """Convert DB row to domain model."""
-        ...
-
-    def _serialize_items(self, items: tuple[OrderItem, ...]) -> str:
-        """Convert domain model to DB format."""
+        # Pseudo-code: Database mutation (side effect)
+        # execute_query(
+        #     "INSERT INTO orders (id, items, total) VALUES (%s, %s, %s)",
+        #     [order.id, serialize(order.items), str(order.total)]
+        # )
         ...
 ```
+
+**Note**: Infrastructure code examples are shown as pseudo-code or minimal sketches to focus on architecture. In production, add proper error handling, transactions, and connection management.
 
 ### Boundary Layer (Validation & Adaptation)
 
@@ -459,26 +490,35 @@ def to_domain_order(req: CreateOrderRequest, order_id: str) -> Order:
     )
 
 def from_domain_order(order: Order) -> dict[str, object]:
-    """Adapt domain model to API response."""
+    """Adapt domain model to API response.
+
+    Float vs String: Use string for precision-critical APIs, float for compatibility.
+    """
     return {
         "id": order.id,
         "items": [
             {
                 "product_id": item.product_id,
                 "quantity": item.quantity,
-                "unit_price": float(item.unit_price),  # Decimal → float
+                # Option A: string (recommended for precision)
+                "unit_price": str(item.unit_price),
+                # Option B: float (for external API compatibility)
+                # "unit_price": float(item.unit_price),
             }
             for item in order.items
         ],
-        "total": float(order.total),
+        "total": str(order.total),  # Prefer string for money
     }
 ```
 
 **Decimal vs float policy**:
 - **Domain**: Always `Decimal` for monetary values (precision, no rounding errors)
-- **Boundary**: Convert `float` → `Decimal` on input, `Decimal` → `float` on output
+- **Boundary (input)**: Convert `float` → `Decimal` using `Decimal(str(value))`
+- **Boundary (output)**:
+  - **Prefer string** (`str(decimal_value)`) for precision-critical APIs
+  - **Use float** (`float(decimal_value)`) only for external API compatibility
 - **Infrastructure**: Store as `NUMERIC`/`DECIMAL` in DB, convert to `Decimal` when loading
-- **Never**: Mix `Decimal` and `float` in calculations
+- **Never**: Mix `Decimal` and `float` in domain calculations
 
 ---
 
@@ -501,6 +541,8 @@ Configure `pyright` in strict mode to catch errors at development time.
 ### Type All Public APIs
 
 ```python
+from typing import Sequence
+
 def fetch_user(user_id: str) -> User | None:
     """Fetch user by ID. Returns None if not found."""
     ...
@@ -536,12 +578,12 @@ def parse_external_api(response: dict[str, Any]) -> User:
     )
 ```
 
-### Use TypeAlias for Complex Unions
+### Use TypeAlias for Complex Types
 
 ```python
 from typing import TypeAlias, Literal
 
-# TypeAlias for clarity
+# TypeAlias for clarity (define per use case)
 Status: TypeAlias = Literal["pending", "active", "archived"]
 UserId: TypeAlias = str
 Email: TypeAlias = str
@@ -601,6 +643,8 @@ class MockEmailSender:
         print(f"Mock: sending to {to}")
 
 # Both satisfy EmailSender protocol without inheritance
+def send_welcome_email(sender: EmailSender, user: User) -> None:
+    sender.send(user.email, "Welcome", "Welcome to our service!")
 ```
 
 ---
@@ -620,24 +664,29 @@ class MockEmailSender:
 - Programming errors
 
 ```python
+from decimal import Decimal
+
 # ✅ None: expected absence
 def find_user_by_email(email: str) -> User | None:
     """Returns None if user not found (normal case)."""
     ...
 
 # ✅ Exception: invalid state
-def charge_order(order: Order) -> ChargeResult:
+def charge_order(order: Order) -> dict[str, str]:
     """Raises ValueError if order total is zero."""
     if order.total <= Decimal("0"):
         raise ValueError("Cannot charge order with zero total")
-    ...
+    return {"status": "charged"}
 
 # ✅ Exception: validation failure
 def create_user(email: str, name: str) -> User:
     """Raises ValidationError if inputs are invalid."""
     if not email or "@" not in email:
         raise ValidationError("Invalid email format")
-    ...
+    return User(id="u123", email=email, name=name)
+
+class ValidationError(Exception):
+    """Input validation failure."""
 ```
 
 **Guidelines**:
@@ -670,37 +719,40 @@ class ExternalServiceError(ApplicationError):
 ```python
 import json
 
-try:
-    config = json.loads(config_str)
-except json.JSONDecodeError as e:
-    # Preserve original exception for debugging
-    raise ValueError(f"Invalid config format: {config_str[:50]}...") from e
+def load_config(config_str: str) -> dict[str, object]:
+    try:
+        return json.loads(config_str)
+    except json.JSONDecodeError as e:
+        # Preserve original exception for debugging
+        raise ValueError(f"Invalid config format: {config_str[:50]}...") from e
 ```
 
 ### Result Pattern (Optional)
 
 Use when you want to make failure explicit in return types (library code, validation pipelines).
 
+**Important**: Define Result types per use case (not as a generic TypeAlias) for type safety.
+
 ```python
 from dataclasses import dataclass
-from typing import TypeAlias, TypeVar, Generic
-
-T = TypeVar("T")
-E = TypeVar("E")
+from typing import TypeAlias
 
 @dataclass(frozen=True)
-class Success(Generic[T]):
+class Success[T]:
+    """Generic success wrapper."""
     value: T
 
 @dataclass(frozen=True)
-class Failure(Generic[E]):
+class Failure[E]:
+    """Generic failure wrapper."""
     error: E
 
-# TypeAlias for clarity and type safety
-Result: TypeAlias = Success[T] | Failure[E]
+# ✅ Define Result per use case (type-safe)
+ParseAgeResult: TypeAlias = Success[int] | Failure[str]
+ValidateEmailResult: TypeAlias = Success[str] | Failure[str]
 
 # Library function: returns Result instead of raising
-def parse_age(value: str) -> Result[int, str]:
+def parse_age(value: str) -> ParseAgeResult:
     """Parse age from string. Returns Result instead of raising.
 
     Use Result pattern when:
@@ -725,6 +777,8 @@ def process_age_input(input_str: str) -> None:
             print(f"Error: {error}")
 ```
 
+**Why per-use-case TypeAlias**: Prevents type inference issues with generic `Result[T, E]` when copying code across modules. Each function gets its own concrete Result type.
+
 ---
 
 ## Code Organization
@@ -732,9 +786,12 @@ def process_age_input(input_str: str) -> None:
 ### Naming Conventions
 
 ```python
+from typing import Sequence, TypeAlias
+from decimal import Decimal
+
 # Variables and functions: snake_case
 user_count = 42
-def calculate_total(items: Sequence[Item]) -> Decimal: ...
+def calculate_total(items: Sequence[OrderItem]) -> Decimal: ...
 
 # Classes: PascalCase
 class UserRepository: ...
@@ -773,7 +830,7 @@ project/
 │   └── routes.py       # FastAPI routes
 └── shared/              # Shared utilities
     ├── types.py        # Common type aliases
-    └── logging.py      # Logging setup
+    └── config.py       # Configuration
 ```
 
 ### Public API Definition
@@ -876,22 +933,26 @@ def search_users(
 - **Pure functions** for domain logic (no side effects, no logging)
 - **Immutable domain models** (`frozen=True`, `tuple`, `frozenset`)
 - **`Decimal`** for monetary values in domain
+- **String output** for Decimal in APIs (precision)
 - **Type annotations** on all public APIs
 - **Early returns** to reduce nesting
 - **Generator expressions** for large datasets
 - **Pattern matching** for type dispatch
 - **Protocol** for dependency inversion
 - **None** for expected absence, **exceptions** for errors
+- **`collections.abc.Iterator`** for Python 3.11+
 
 ### Prefer ✅
 
 - **Comprehensions** over map/filter with lambda
-- **Built-in aggregators** (`sum`, `any`, `all`) over `reduce`
+- **Built-in methods** (`frozenset().union()`) over `reduce`
+- **Built-in aggregators** (`sum`, `any`, `all`) over custom loops
 - **Specific types** over `Any`
 - **Dataclasses** over plain dicts
 - **Enums** over string constants
 - **`tuple`** over `list` for domain collections
 - **`Sequence[T]`** for read-only parameters
+- **Per-use-case Result types** over generic `Result[T, E]`
 
 ### Avoid ❌
 
@@ -905,13 +966,16 @@ def search_users(
 - **Side effects in domain layer** (logging, I/O)
 - **Mixing `Decimal` and `float`** in calculations
 - **Mutable collections in domain models** (`list`, `dict`)
+- **`reduce` when built-in alternatives exist**
+- **Float output for monetary values** (prefer string)
 
 ### Context-Dependent ⚠️
 
 - **`for` loops**: OK for side effects, complex multi-step logic, or when clearer
-- **Mutable collections**: OK in DTOs, performance-critical code (after profiling), local scope
+- **Local mutable collections**: OK in pure functions (if never exposed)
 - **Result pattern**: Use in library code or validation pipelines
 - **`NotFoundError`**: Use when exception is semantically better than `None`
+- **Float in API responses**: Only for external API compatibility (document why)
 
 ---
 
@@ -920,7 +984,9 @@ def search_users(
 **Critical for financial applications**: Use `Decimal` consistently to avoid rounding errors.
 
 ```python
+from dataclasses import dataclass
 from decimal import Decimal
+from pydantic import BaseModel
 
 # ✅ Domain: Always Decimal
 @dataclass(frozen=True)
@@ -930,7 +996,7 @@ class OrderItem:
     def apply_tax(self, rate: Decimal) -> Decimal:
         return self.unit_price * rate
 
-# ✅ Boundary: Convert at edges
+# ✅ Boundary (input): Convert at edges
 class OrderItemInput(BaseModel):
     unit_price: float  # External API uses float
 
@@ -938,6 +1004,13 @@ def to_domain_item(dto: OrderItemInput) -> OrderItem:
     return OrderItem(
         unit_price=Decimal(str(dto.unit_price))  # float → Decimal
     )
+
+# ✅ Boundary (output): Prefer string for precision
+def to_api_response(item: OrderItem) -> dict[str, object]:
+    return {
+        "unit_price": str(item.unit_price),  # Decimal → string (recommended)
+        # Alternative: float(item.unit_price) only for external compatibility
+    }
 
 # ✅ Literals: Use string for exact precision
 discount_rate = Decimal("0.9")  # Exact
@@ -948,11 +1021,13 @@ discount_rate = Decimal(0.9)  # Imprecise (binary float representation)
 ```
 
 **Decimal rules**:
-1. Domain models always use `Decimal` for money
-2. Convert `float` → `Decimal` at boundary using `Decimal(str(value))`
-3. Use string literals for `Decimal` constants: `Decimal("0.1")`
-4. Infrastructure stores as `NUMERIC`/`DECIMAL`, converts to `Decimal` on load
-5. API responses convert `Decimal` → `float` using `float(value)`
+1. **Domain**: Always `Decimal` for money
+2. **Input conversion**: `Decimal(str(float_value))`
+3. **Literal creation**: `Decimal("0.1")` (string)
+4. **Output format**:
+   - **Prefer string**: `str(decimal_value)` for precision
+   - **Use float**: `float(decimal_value)` only for external API compatibility
+5. **Infrastructure**: Store as `NUMERIC`/`DECIMAL`, convert to `Decimal` on load
 
 ---
 
