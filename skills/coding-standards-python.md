@@ -1,432 +1,481 @@
 ---
 name: coding-standards-python
-description: Python coding standards with functional programming principles inspired by Lisp. Emphasizes map/filter/reduce, immutability, pure functions, and function composition. For Python 3.11+.
+description: Production-ready Python standards with functional programming principles. Emphasizes comprehensions, immutability, pure functions, and type safety. For Python 3.11+ with pyright strict.
 ---
 
-# Python Coding Standards (Functional Style)
+# Python Coding Standards
 
-Language-level standards for Python 3.11+ with functional programming principles inspired by Lisp. Backend patterns in backend-patterns-fastapi.md. Formatting handled by Ruff.
+Production-ready standards for Python 3.11+ with functional programming principles. Backend patterns in backend-patterns-fastapi.md. Formatting handled by Ruff.
 
-**Philosophy**: Favor pure functions, immutability, and composable transformations. Minimize side effects and explicit loops.
+**Philosophy**: Write clear, testable, type-safe code. Favor pure functions and immutability where practical. Prefer comprehensions over loops. Let pyright strict guide correctness.
 
 ---
 
-## Functional Programming Principles
+## Core Principles
 
-### 1. Pure Functions First
+### 1. Pure Functions When Possible
 
 **Pure Function**: Same input → same output, no side effects.
 
 ```python
-# ✅ Pure
-def calculate_total(items: list[float]) -> float:
-    return sum(items)
+# ✅ Pure: deterministic and testable
+def calculate_discount(price: float, rate: float) -> float:
+    return price * (1 - rate)
 
-# ❌ Impure (modifies global state)
-total = 0
+# ❌ Impure: depends on and modifies global state
+_total = 0.0
+
 def add_to_total(amount: float) -> None:
-    global total
-    total += amount
+    global _total
+    _total += amount
 ```
 
-**Benefits**: Easy to test, reason about, parallelize, and cache.
+**Benefits**: Easier to test, reason about, cache, and parallelize.
 
-### 2. Immutability by Default
+**When to use side effects**: I/O operations, database access, logging, external API calls are inherently impure—embrace this at the boundary layer.
+
+### 2. Immutability for Domain Models
+
+Use `frozen=True` for domain models to prevent accidental mutations.
 
 ```python
 from dataclasses import dataclass
+from decimal import Decimal
 
-# ✅ Immutable
+# ✅ Domain model: immutable
 @dataclass(frozen=True)
-class Point:
-    x: float
-    y: float
+class Money:
+    amount: Decimal
+    currency: str
 
-def move(point: Point, dx: float, dy: float) -> Point:
-    return Point(point.x + dx, point.y + dy)
+@dataclass(frozen=True)
+class User:
+    id: str
+    email: str
+    name: str
 
-# ❌ Mutable (harder to reason about)
-@dataclass
-class MutablePoint:
-    x: float
-    y: float
-
-def move_mutate(point: MutablePoint, dx: float, dy: float) -> None:
-    point.x += dx
-    point.y += dy
+# Return new instances instead of mutating
+def update_name(user: User, new_name: str) -> User:
+    return dataclass.replace(user, name=new_name)
 ```
 
-**Allow mutability**: Performance-critical code (after profiling), interfacing with imperative libraries, local variables never exposed.
+**When to allow mutability**:
+- DTOs/configs where mutation is expected (e.g., Pydantic models)
+- Performance-critical code (after profiling)
+- Local variables never exposed outside function scope
 
-### 3. Prefer Expressions Over Statements
+### 3. Expressions Over Statements
 
 ```python
 # ✅ Expression-oriented
-status = "active" if user.is_verified else "pending"
+status = "active" if user.verified else "pending"
 
 # ❌ Statement-oriented
-if user.is_verified:
+if user.verified:
     status = "active"
 else:
     status = "pending"
 ```
 
+Use ternary expressions, comprehensions, and pattern matching to minimize mutable state.
+
 ---
 
-## List Processing (Map, Filter, Reduce)
+## Data Transformation
 
-### Map: Transform Elements
+### Comprehensions First (Pythonic)
 
-```python
-# ✅ Comprehension (Pythonic)
-discounted = [p * 0.9 for p in prices]
-
-# ✅ map() with named function (complex logic)
-def apply_tax(price: float) -> float:
-    return price * 1.1
-
-taxed = list(map(apply_tax, prices))
-
-# ❌ Explicit loop (avoid for pure transformations)
-result = []
-for price in prices:
-    result.append(price * 0.9)
-```
-
-**Use comprehensions** for simple transformations, **map()** for higher-order functions or lazy evaluation.
-
-### Filter: Select Elements
+**Default choice**: Use comprehensions for transformations and filtering.
 
 ```python
-# ✅ Comprehension
-evens = [n for n in numbers if n % 2 == 0]
+# ✅ List comprehension (clear and Pythonic)
+discounted = [price * 0.9 for price in prices]
+adults = [user for user in users if user.age >= 18]
+user_map = {u.id: u.name for u in users}
 
-# ✅ filter() with predicate
-def is_adult(age: int) -> bool:
-    return age >= 18
-
-adults = list(filter(is_adult, ages))
+# ✅ Generator expression (memory efficient)
+total = sum(item.price * item.quantity for item in cart.items)
 ```
 
-### Reduce: Aggregate Values
+### Map/Filter for Higher-Order Functions
+
+Use `map()` and `filter()` when passing functions as arguments or for lazy evaluation.
+
+```python
+from operator import attrgetter
+
+# ✅ map with function reference
+prices = list(map(attrgetter("price"), items))
+
+# ✅ filter with predicate function
+def is_active(user: User) -> bool:
+    return user.status == "active"
+
+active_users = list(filter(is_active, users))
+
+# ❌ Avoid map/filter with lambda (use comprehension)
+prices = [item.price for item in items]  # Better than map(lambda i: i.price, items)
+```
+
+### Reduce for Aggregation
+
+Prefer built-in aggregators (`sum`, `any`, `all`, `min`, `max`). Use `reduce` for custom aggregation.
 
 ```python
 from functools import reduce
-from operator import add, mul
+from operator import or_
 
-total = reduce(add, numbers, 0)
-product = reduce(mul, numbers, 1)
-
-# Prefer built-ins when available
-total = sum(numbers)
-all_true = all(conditions)
-```
-
-### Combining Transformations
-
-```python
-# ✅ Generator expression (memory efficient)
-total = sum(
-    item["price"] * item["quantity"]
-    for item in items
-    if item["price"] > 100
-)
-
-# ✅ Explicit pipeline (clearer intent)
-total = sum(map(get_value, filter(is_expensive, items)))
-```
-
----
-
-## For Loops: Only for Side Effects
-
-**Principle**: Use `for` only for side effects (I/O, mutations). For pure transformations, use map/filter/comprehensions.
-
-### ✅ Allowed: Side Effects
-
-```python
-# I/O operations
-for user in users:
-    logger.info("Processing: %s", user.id)
-    send_email(user.email)
-
-# External API calls
-for url in urls:
-    response = requests.get(url)
-    process_response(response)
-
-# Database operations
-for record in records:
-    db.insert(record)
-```
-
-### ❌ Prohibited: Pure Transformations
-
-```python
-# ❌ BAD: for loop for transformation
-result = []
-for item in items:
-    result.append(transform(item))
-
-# ✅ GOOD: comprehension
-result = [transform(item) for item in items]
-
-# ❌ BAD: for loop for aggregation
-total = 0
-for item in items:
-    total += item.price
-
-# ✅ GOOD: sum
+# ✅ Built-in aggregators
 total = sum(item.price for item in items)
+has_errors = any(r.is_error for r in results)
+
+# ✅ reduce for custom aggregation
+permissions = reduce(or_, (user.permissions for user in users), set())
 ```
 
-**Exception**: Performance-critical code (after profiling). Document the reason.
+### For Loops: Practical Guidelines
+
+**Principle**: Prefer comprehensions for pure transformations. Use `for` loops when:
+- Performing side effects (I/O, logging, API calls)
+- Readability is significantly improved
+- Complex multi-step logic
+
+```python
+# ✅ Side effects: for loop is appropriate
+for user in users:
+    logger.info("Processing user %s", user.id)
+    send_email(user.email, template)
+
+# ✅ Comprehension for pure transformation
+validated = [validate_user(u) for u in users]
+
+# ⚠️ Complex logic: readability trumps purity
+results = []
+for item in items:
+    if item.price > 100:
+        discounted = item.price * 0.9
+        tax = discounted * 0.1
+        results.append({"price": discounted, "tax": tax})
+    else:
+        results.append({"price": item.price, "tax": 0})
+
+# If this becomes unreadable, extract a function:
+def calculate_pricing(item: Item) -> dict:
+    if item.price > 100:
+        discounted = item.price * 0.9
+        return {"price": discounted, "tax": discounted * 0.1}
+    return {"price": item.price, "tax": 0}
+
+results = [calculate_pricing(item) for item in items]
+```
+
+**Avoid**: `for` loops that build lists via `.append()` when a comprehension is clearer.
 
 ---
 
-## Function Composition and Pipelines
+## Control Flow & Patterns
 
-### Composition
+### Early Returns
 
-```python
-from typing import Callable, TypeVar
-
-T = TypeVar("T")
-U = TypeVar("U")
-V = TypeVar("V")
-
-def compose(f: Callable[[U], V], g: Callable[[T], U]) -> Callable[[T], V]:
-    """compose(f, g)(x) = f(g(x))"""
-    return lambda x: f(g(x))
-
-# Example
-final_price = compose(add_tax, apply_discount)
-result = final_price(100)  # (100 * 0.9) * 1.1
-```
-
-### Pipeline
+Reduce nesting with early returns for validation and error cases.
 
 ```python
-def pipe(value: T, *functions: Callable) -> T:
-    """Apply functions left-to-right."""
-    result = value
-    for func in functions:
-        result = func(result)
-    return result
+def process_order(order: Order | None) -> dict:
+    if order is None:
+        raise ValueError("Order not found")
+    if not order.items:
+        raise ValueError("Order has no items")
+    if order.total <= 0:
+        raise ValueError("Invalid order total")
 
-# Example
-username = pipe(
-    "  John Doe  ",
-    str.lower,
-    str.strip,
-    lambda s: s.replace(" ", ""),
-    lambda s: f"user_{s}",
-)
+    # Happy path at top level
+    return {"id": order.id, "total": order.total}
 ```
 
-**Optional**: Use `toolz` library for `pipe()` and `compose()`.
+### Pattern Matching (Python 3.10+)
 
----
-
-## Higher-Order Functions
+Use pattern matching for type-based dispatch and data destructuring.
 
 ```python
-# Takes function as argument
-def apply_twice(func: Callable[[int], int], value: int) -> int:
-    return func(func(value))
+from dataclasses import dataclass
 
-# Returns function
-def make_multiplier(factor: int) -> Callable[[int], int]:
-    return lambda n: n * factor
+@dataclass(frozen=True)
+class Success:
+    value: str
 
-# Partial application
-from functools import partial
+@dataclass(frozen=True)
+class Error:
+    message: str
 
-say_hello = partial(greet, "Hello")
+Result = Success | Error
+
+def handle_result(result: Result) -> str:
+    match result:
+        case Success(value):
+            return f"Success: {value}"
+        case Error(message):
+            return f"Error: {message}"
 ```
 
----
+### Lazy Evaluation with Generators
 
-## Lazy Evaluation
+Use generators for large datasets and infinite sequences.
 
 ```python
 from typing import Iterator
-from itertools import islice
 
-# Generator - infinite sequence
-def fibonacci() -> Iterator[int]:
-    a, b = 0, 1
-    while True:
-        yield a
-        a, b = b, a + b
-
-first_10 = list(islice(fibonacci(), 10))
-
-# Generator expression - memory efficient
-squares = (x**2 for x in range(1000000))
-first_5 = list(islice(squares, 5))
-
-# Lazy file processing
-def process_large_file(path: str) -> Iterator[dict]:
+def read_large_file(path: str) -> Iterator[dict]:
+    """Process file lazily without loading into memory."""
     with open(path) as f:
         for line in f:
             yield parse_line(line)
+
+# Consume lazily
+for record in read_large_file("data.jsonl"):
+    process(record)
+
+# Or use itertools
+from itertools import islice
+first_10 = list(islice(read_large_file("data.jsonl"), 10))
 ```
 
 ---
 
-## Recursion (Use Carefully)
+## Architecture Layers
 
-**Python has limited stack depth (default: 1000). Prefer iteration or reduce.**
+Organize code into clear layers to separate pure logic from side effects.
 
-```python
-# ✅ Tree traversal (natural recursion)
-@dataclass(frozen=True)
-class Node:
-    value: int
-    left: "Node | None" = None
-    right: "Node | None" = None
+### Domain Layer (Pure Business Logic)
 
-def sum_tree(node: Node | None) -> int:
-    if node is None:
-        return 0
-    return node.value + sum_tree(node.left) + sum_tree(node.right)
-
-# ✅ Better: reduce for factorial
-from functools import reduce
-from operator import mul
-
-def factorial(n: int) -> int:
-    return reduce(mul, range(1, n + 1), 1)
-```
-
----
-
-## Pattern Matching (Python 3.10+)
+Pure functions and immutable domain models. No I/O, no framework dependencies.
 
 ```python
+# domain/models.py
 from dataclasses import dataclass
+from decimal import Decimal
 
 @dataclass(frozen=True)
-class Circle:
-    radius: float
-
-@dataclass(frozen=True)
-class Rectangle:
-    width: float
-    height: float
-
-Shape = Circle | Rectangle
-
-def area(shape: Shape) -> float:
-    match shape:
-        case Circle(radius=r):
-            return 3.14159 * r * r
-        case Rectangle(width=w, height=h):
-            return w * h
-```
-
----
-
-## Naming Conventions
-
-```python
-# Variables and functions: snake_case
-user_count = 42
-def calculate_total(items: list) -> float: ...
-
-# Classes: PascalCase
-class UserRepository: ...
-
-# Constants: UPPER_SNAKE_CASE
-MAX_RETRIES = 3
-
-# Private: _prefix
-class User:
-    def __init__(self, name: str):
-        self._name = name
-```
-
----
-
-## Type Hints
-
-### Use Type Hints for Public APIs
-
-```python
-def fetch_user(user_id: str) -> dict[str, Any]: ...
-def process_items(items: list[str]) -> list[int]: ...
-
-# Modern syntax (Python 3.10+)
-def get_user(user_id: str) -> User | None: ...
-```
-
-### Prefer Structured Types
-
-```python
-from typing import TypedDict
-from dataclasses import dataclass
-
-# TypedDict: static type checking
-class UserPayload(TypedDict):
+class Order:
     id: str
-    name: str
-    email: str
+    items: list["OrderItem"]
 
-# Dataclass: domain models
+    @property
+    def total(self) -> Decimal:
+        return sum(item.subtotal for item in self.items)
+
 @dataclass(frozen=True)
-class User:
-    id: str
-    name: str
-    email: str
+class OrderItem:
+    product_id: str
+    quantity: int
+    unit_price: Decimal
+
+    @property
+    def subtotal(self) -> Decimal:
+        return self.unit_price * self.quantity
+
+# domain/services.py
+def apply_discount(order: Order, rate: Decimal) -> Order:
+    """Pure function: returns new order with discounted items."""
+    discounted_items = [
+        dataclass.replace(item, unit_price=item.unit_price * (1 - rate))
+        for item in order.items
+    ]
+    return dataclass.replace(order, items=discounted_items)
 ```
 
-### When to Use `Any`
+### Infrastructure Layer (Side Effects)
 
-Use `Any` only at system boundaries. Document the reason.
+Database access, external APIs, file I/O. Implements interfaces defined by domain.
 
 ```python
-def parse_external_api(response: dict[str, Any]) -> User:
-    """Uses Any because external schema is not under our control."""
-    return User(
-        id=str(response["id"]),
-        name=str(response["name"]),
-        email=str(response["email"]),
+# infrastructure/repositories.py
+from typing import Protocol
+
+class OrderRepository(Protocol):
+    def get(self, order_id: str) -> Order | None: ...
+    def save(self, order: Order) -> None: ...
+
+class PostgresOrderRepository:
+    def __init__(self, conn: Connection):
+        self._conn = conn
+
+    def get(self, order_id: str) -> Order | None:
+        # Database access (side effect)
+        row = self._conn.execute("SELECT * FROM orders WHERE id = ?", [order_id]).fetchone()
+        return parse_order(row) if row else None
+
+    def save(self, order: Order) -> None:
+        # Database mutation (side effect)
+        self._conn.execute("INSERT INTO orders ...", order_to_dict(order))
+```
+
+### Boundary Layer (Validation & Adaptation)
+
+Validate external input, adapt between external formats and domain models.
+
+```python
+# api/schemas.py (Pydantic for validation)
+from pydantic import BaseModel, Field
+
+class CreateOrderRequest(BaseModel):
+    items: list[OrderItemInput]
+
+    class Config:
+        frozen = True  # Immutable after validation
+
+class OrderItemInput(BaseModel):
+    product_id: str = Field(min_length=1)
+    quantity: int = Field(gt=0)
+    unit_price: float = Field(gt=0)
+
+# api/adapters.py
+def to_domain_order(req: CreateOrderRequest, order_id: str) -> Order:
+    """Adapt validated input to domain model."""
+    return Order(
+        id=order_id,
+        items=[
+            OrderItem(
+                product_id=item.product_id,
+                quantity=item.quantity,
+                unit_price=Decimal(str(item.unit_price)),
+            )
+            for item in req.items
+        ],
     )
 ```
 
-### Use Literal for Fixed Values
+---
+
+## Type System
+
+### Use Strict Type Checking
+
+Configure `pyright` in strict mode to catch errors at development time.
+
+```json
+// pyrightconfig.json
+{
+  "typeCheckingMode": "strict",
+  "reportMissingTypeStubs": false
+}
+```
+
+### Type All Public APIs
+
+```python
+def fetch_user(user_id: str) -> User | None:
+    """Fetch user by ID. Returns None if not found."""
+    ...
+
+def process_items(items: list[str]) -> list[int]:
+    """Convert string items to integers."""
+    ...
+```
+
+### Prefer Specific Types Over `Any`
+
+```python
+from typing import Any
+
+# ❌ Avoid Any in internal code
+def process(data: Any) -> Any:
+    ...
+
+# ✅ Use specific types
+def process(data: dict[str, int]) -> list[int]:
+    ...
+
+# ✅ OK: System boundaries (document why)
+def parse_external_api(response: dict[str, Any]) -> User:
+    """Uses Any because external API schema is not under our control."""
+    return User(
+        id=str(response["id"]),
+        email=str(response["email"]),
+        name=str(response["name"]),
+    )
+```
+
+### Use Literal and Enums
 
 ```python
 from typing import Literal
+from enum import Enum
 
-Status = Literal["active", "inactive", "archived"]
+# Literal for simple fixed values
+Status = Literal["pending", "active", "archived"]
+
+# Enum for richer semantics
+class OrderStatus(Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    SHIPPED = "shipped"
+
+    @property
+    def is_final(self) -> bool:
+        return self in {OrderStatus.SHIPPED}
+```
+
+### Leverage TypedDict for Structured Dicts
+
+```python
+from typing import TypedDict
+
+class UserDict(TypedDict):
+    id: str
+    email: str
+    name: str
+
+def format_user(user: UserDict) -> str:
+    return f"{user['name']} <{user['email']}>"
 ```
 
 ---
 
 ## Error Handling
 
-### Exception Inheritance
+### Exceptions vs Result Pattern
+
+**Use exceptions** (default):
+- Exceptional conditions (file not found, network error, invalid state)
+- Framework integration (FastAPI, Django)
+- Application-level errors
+
+**Use Result pattern** (optional):
+- Library code that shouldn't raise exceptions
+- Railway-oriented programming for validation pipelines
+- When you want to make errors explicit in type signatures
+
+### Exception Hierarchy
 
 ```python
 class ApplicationError(Exception):
     """Base for all application errors."""
 
 class ValidationError(ApplicationError):
-    """Validation failure."""
+    """Input validation failure."""
+
+class NotFoundError(ApplicationError):
+    """Resource not found."""
+
+class AuthorizationError(ApplicationError):
+    """User not authorized."""
 ```
 
-### Preserve Exception Chain
+### Preserve Exception Context
 
 ```python
+import json
+
 try:
-    return json.loads(config_str)
+    config = json.loads(config_str)
 except json.JSONDecodeError as e:
-    raise ValueError("Invalid config") from e
+    # Preserve original exception for debugging
+    raise ValueError(f"Invalid config format: {config_str}") from e
 ```
 
-### Result Pattern (Functional Error Handling)
+### Result Pattern (Optional)
+
+Use when you want to make failure explicit in return types.
 
 ```python
 from dataclasses import dataclass
@@ -445,216 +494,221 @@ class Failure(Generic[E]):
 
 Result = Success[T] | Failure[E]
 
-# Usage with pattern matching
-result = parse_config(data)
-match result:
-    case Success(value):
-        process(value)
+# Library function: returns Result instead of raising
+def parse_age(value: str) -> Result[int, str]:
+    try:
+        age = int(value)
+        if age < 0 or age > 150:
+            return Failure("Age out of valid range")
+        return Success(age)
+    except ValueError:
+        return Failure(f"Invalid integer: {value}")
+
+# Consumer uses pattern matching
+match parse_age(input_str):
+    case Success(age):
+        print(f"Age: {age}")
     case Failure(error):
-        logger.error("Failed: %s", error)
+        print(f"Error: {error}")
 ```
 
 ---
 
-## Data Structures
+## Code Organization
 
-### Dataclasses for Domain Models
-
-```python
-from dataclasses import dataclass
-from decimal import Decimal
-
-@dataclass(frozen=True)
-class Money:
-    amount: Decimal
-    currency: str
-
-@dataclass(frozen=True)
-class OrderItem:
-    product_id: str
-    quantity: int
-    price: Decimal
-```
-
-### Enums for Fixed Sets
+### Naming Conventions
 
 ```python
-from enum import Enum, auto
+# Variables and functions: snake_case
+user_count = 42
+def calculate_total(items: list[Item]) -> Decimal: ...
 
-class Status(Enum):
-    PENDING = auto()
-    CONFIRMED = auto()
-    SHIPPED = auto()
+# Classes: PascalCase
+class UserRepository: ...
 
-def update_status(status: Status) -> None:
-    match status:
-        case Status.PENDING: ...
-        case Status.CONFIRMED: ...
-        case Status.SHIPPED: ...
-```
-
----
-
-## Itertools and Functools
-
-```python
-from itertools import chain, groupby, islice, takewhile
-from functools import reduce, partial, lru_cache
-
-# chain: flatten nested lists
-flat = list(chain.from_iterable([[1, 2], [3, 4]]))
-
-# partial: specialized functions
-double = partial(mul, 2)
-
-# lru_cache: memoization for pure functions
-@lru_cache(maxsize=128)
-def fibonacci(n: int) -> int:
-    if n < 2:
-        return n
-    return fibonacci(n - 1) + fibonacci(n - 2)
-```
-
----
-
-## Documentation
-
-### Docstrings for Public APIs
-
-```python
-def search_items(query: str, limit: int = 10) -> list[dict]:
-    """Search items using semantic similarity.
-
-    Args:
-        query: Search query string
-        limit: Maximum results (default: 10)
-
-    Returns:
-        List of items sorted by relevance
-
-    Raises:
-        ValueError: If query is empty
-    """
-```
-
-### Comments Explain WHY
-
-```python
-# Exponential backoff prevents API overload during outages
-delay = min(30, 2**retry_count)
-```
-
----
-
-## Code Quality
-
-### Avoid Magic Numbers
-
-```python
+# Constants: UPPER_SNAKE_CASE
 MAX_RETRIES = 3
-TIMEOUT_SECONDS = 30
+DEFAULT_TIMEOUT = 30
 
-if retry_count > MAX_RETRIES:
-    raise MaxRetriesExceeded()
+# Private: leading underscore
+class User:
+    def __init__(self, name: str):
+        self._name = name
+
+    def _internal_helper(self) -> str:
+        return self._name.upper()
 ```
 
-### Early Returns
+### Module Organization
 
-```python
-def process_order(order: Order | None) -> Result[Order, str]:
-    if order is None:
-        return Failure("Order not found")
-    if not order.items:
-        return Failure("No items")
-    return Success(complete_order(order))
+```
+project/
+├── domain/              # Pure business logic
+│   ├── models.py       # Domain models (frozen dataclasses)
+│   └── services.py     # Pure business functions
+├── infrastructure/      # Side effects (DB, APIs)
+│   ├── repositories.py
+│   └── external_api.py
+├── api/                 # Boundary layer
+│   ├── schemas.py      # Pydantic models
+│   ├── adapters.py     # Domain ↔ API conversion
+│   └── routes.py       # FastAPI routes
+└── shared/              # Shared utilities
+    ├── types.py        # Common types
+    └── errors.py       # Exception hierarchy
 ```
 
----
-
-## Tooling and Static Analysis
-
-### Required Tools
-
-- Python 3.11+
-- Ruff for linting and formatting
-- pyright for type checking (strict mode)
-
-### Type Checking Configuration
-
-```json
-{
-  "typeCheckingMode": "strict"
-}
-```
-
-### CI Enforcement
-
-- Ruff linting (zero errors)
-- Ruff formatting check
-- pyright strict mode
-- No implicit `Any` in public APIs (except documented boundaries)
-
----
-
-## Public API Definition
+### Public API Definition
 
 A module's public API consists of:
 - Top-level functions/classes without `_` prefix
 - Names in `__all__` if present
-- Imports in `__init__.py`
+- Exports in `__init__.py`
+
+```python
+# my_module.py
+def public_function() -> str:
+    """Public: exported."""
+    return _internal_helper()
+
+def _internal_helper() -> str:
+    """Private: not exported."""
+    return "internal"
+
+__all__ = ["public_function"]
+```
 
 **Public API requirements**:
-- Must have type annotations
-- Must have docstrings
-- Must validate external inputs
-- Should avoid `Any` (boundary exceptions documented)
-
-**Private code** (`_` prefix):
-- May omit docstrings if obvious
-- Should still have type hints
+- Complete type annotations
+- Docstrings (Google or NumPy style)
+- Input validation at boundaries
+- Avoid `Any` (document exceptions)
 
 ---
 
-## Functional Style Summary
+## Tooling & Quality
+
+### Required Tools
+
+- **Python 3.11+**: Modern syntax (match, union types, dataclass improvements)
+- **Ruff**: Linting and formatting (replaces Black, isort, flake8)
+- **pyright**: Type checking in strict mode
+
+### Ruff Configuration
+
+```toml
+# pyproject.toml
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+]
+```
+
+### Pyright Configuration
+
+```json
+// pyrightconfig.json
+{
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.11",
+  "exclude": ["**/node_modules", "**/__pycache__", ".venv"]
+}
+```
+
+### Documentation
+
+Use Google-style docstrings for public APIs:
+
+```python
+def search_users(
+    query: str,
+    limit: int = 10,
+    offset: int = 0,
+) -> list[User]:
+    """Search users by query string.
+
+    Args:
+        query: Search query (name or email)
+        limit: Maximum results (default: 10)
+        offset: Pagination offset (default: 0)
+
+    Returns:
+        List of users matching query, sorted by relevance
+
+    Raises:
+        ValueError: If query is empty or limit is negative
+    """
+```
+
+### CI Enforcement
+
+```yaml
+# .github/workflows/ci.yml
+- run: ruff check .
+- run: ruff format --check .
+- run: pyright
+```
+
+---
+
+## Best Practices Summary
+
+### Always ✅
+
+- **Comprehensions** for data transformations
+- **Pure functions** for business logic (domain layer)
+- **Immutable domain models** (`frozen=True`)
+- **Type annotations** on all public APIs
+- **Early returns** to reduce nesting
+- **Generator expressions** for large datasets
+- **Pattern matching** for type dispatch
+- **Exceptions** for error handling (default)
 
 ### Prefer ✅
 
-- Pure functions (no side effects)
-- Immutable data (`frozen=True`)
-- map/filter/reduce over explicit loops
-- List comprehensions for simple transformations
-- Generator expressions for lazy evaluation
-- Function composition and pipelines
-- Pattern matching for data destructuring
-- Result type for expected errors
-- Expressions over statements
+- **Comprehensions** over map/filter with lambda
+- **Built-in aggregators** (`sum`, `any`, `all`) over `reduce`
+- **Specific types** over `Any`
+- **Dataclasses** over plain dicts for structured data
+- **Enums/Literal** over string constants
 
 ### Avoid ❌
 
-- Global state
-- Mutable data structures (unless necessary)
-- `for` loops for pure transformations
-- Deep recursion (Python stack limit)
-- Mutating function arguments
-- Side effects in pure functions
-- Magic numbers
+- **Global mutable state**
+- **`for` loops that build lists** via `.append()` (use comprehensions)
+- **Mutating function arguments**
+- **`Any` in internal code** (OK at system boundaries with docs)
+- **Deep recursion** (Python stack limit ~1000)
+- **Magic numbers** (use named constants)
 
-### Allow (with Justification) ⚠️
+### Context-Dependent ⚠️
 
-- `for` loops for side effects (I/O, mutations)
-- Mutable data for performance (after profiling)
-- Recursion for tree structures (shallow depth)
-- `Any` at system boundaries (documented)
+- **`for` loops**: OK for side effects, complex multi-step logic, or when clearer than comprehensions
+- **Mutable data**: OK for performance (after profiling), DTOs, local scope
+- **Result pattern**: Use in library code or validation pipelines
+- **map/filter**: Use with function references or lazy evaluation
 
 ---
 
-**Principles** (from The Zen of Python):
+**Core Philosophy**:
+
+Write code that is **clear**, **correct**, and **maintainable**. Use functional principles (pure functions, immutability, composition) to achieve this, but prioritize **Python idioms** and **readability**. Let **pyright strict** guide you toward type safety. Test business logic thoroughly. Keep side effects at the boundaries.
+
+**From The Zen of Python**:
 - Explicit is better than implicit
 - Simple is better than complex
 - Readability counts
 
-**Functional Principles** (from Lisp/FP):
-- Data and functions are separate
-- Functions are first-class
+**From Functional Programming**:
+- Pure functions are easier to test and reason about
 - Immutability prevents bugs
-- Composition over inheritance
+- Composition creates reusable building blocks
