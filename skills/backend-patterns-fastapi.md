@@ -5,7 +5,7 @@ description: Backend architecture patterns and best practices for FastAPI. Type-
 
 # FastAPI Backend Patterns
 
-Backend architecture patterns for FastAPI applications with async/await, Pydantic validation, and modern Python practices.
+Backend architecture patterns for FastAPI applications with async/await, Pydantic validation, and modern Python practices. Follows coding-standards-python.md for functional programming principles.
 
 ## Architecture Principles
 
@@ -15,24 +15,22 @@ Keep business logic pure and free from I/O dependencies. Push side effects to th
 
 ```python
 from decimal import Decimal
-from pydantic import BaseModel
+from dataclasses import dataclass, replace
 
-# Pure domain logic
+# ✅ Pure domain logic (no I/O)
 def calculate_discount(price: Decimal, user_tier: str) -> Decimal:
     if user_tier == "premium":
         return price * Decimal("0.9")
     return price
 
-# I/O at boundaries
-from dataclasses import replace
-
+# ✅ I/O at boundaries
 async def apply_discount_to_order(
     order_id: str,
     repository: OrderRepository
 ) -> Order:
     order = await repository.get(order_id)  # I/O
     discounted_price = calculate_discount(order.price, order.user.tier)  # Pure
-    updated_order = order.copy(update={"price": discounted_price})  # Immutable update
+    updated_order = replace(order, price=discounted_price)  # Immutable update
     await repository.save(updated_order)  # I/O
     return updated_order
 ```
@@ -42,43 +40,48 @@ async def apply_discount_to_order(
 Domain models and business logic MUST NOT import database, HTTP, or framework code.
 
 ```python
-from pydantic import BaseModel
+from dataclasses import dataclass, replace
 from decimal import Decimal
-from typing import List
 
-# ✅ GOOD: Pure domain models
-class OrderItem(BaseModel):
+# ✅ GOOD: Pure domain models (frozen dataclass + tuple)
+@dataclass(frozen=True)
+class OrderItem:
     product_id: str
     quantity: int
     price: Decimal
 
-    class Config:
-        frozen = True
+    @property
+    def subtotal(self) -> Decimal:
+        return self.price * self.quantity
 
-class Order(BaseModel):
+@dataclass(frozen=True)
+class Order:
     id: str
-    items: List[OrderItem]
+    items: tuple[OrderItem, ...]  # Immutable collection
     total: Decimal
 
-    class Config:
-        frozen = True
-
     def add_item(self, item: OrderItem) -> "Order":
-        new_total = self.total + (item.price * item.quantity)
-        return self.copy(update={
-            "items": [*self.items, item],
-            "total": new_total
-        })
+        """Pure function: returns new Order with added item."""
+        new_total = self.total + item.subtotal
+        return replace(
+            self,
+            items=(*self.items, item),  # Tuple concatenation
+            total=new_total
+        )
 
 # ❌ BAD: Domain model depending on infrastructure
 from sqlalchemy.orm import Session
 
-class Order(BaseModel):
+class OrderBad:
     # Domain logic should not know about database sessions
     def save(self, db: Session) -> None:
         db.add(self)
         db.commit()
 ```
+
+**Domain vs DTO distinction**:
+- **Domain models**: Use `@dataclass(frozen=True)` with `tuple` for collections
+- **DTOs (Pydantic)**: Use `BaseModel` with `list` for API validation (mutable OK)
 
 ### Avoid Passing Raw Dicts Across Boundaries
 
@@ -87,19 +90,21 @@ Use Pydantic models for data crossing layer boundaries.
 ```python
 from pydantic import BaseModel
 
-# ✅ GOOD: Typed models
+# ✅ GOOD: Typed models (DTOs for API)
 class CreateUserRequest(BaseModel):
     name: str
     email: str
     role: str = "user"
 
-class User(BaseModel):
+    model_config = {"frozen": True}  # Immutable after validation
+
+class UserResponse(BaseModel):
     id: str
     name: str
     email: str
     role: str
 
-async def create_user(request: CreateUserRequest) -> User:
+async def create_user(request: CreateUserRequest) -> UserResponse:
     # Type-safe
     pass
 
@@ -125,8 +130,8 @@ async def save_user_to_database(user: User) -> None:
 def format_email_body(user: User) -> str:
     pass
 
-def calculate_total_price(items: List[OrderItem]) -> Decimal:
-    pass
+def calculate_total_price(items: tuple[OrderItem, ...]) -> Decimal:
+    return sum((item.subtotal for item in items), start=Decimal("0"))
 ```
 
 ## API Design with FastAPI
@@ -136,14 +141,13 @@ def calculate_total_price(items: List[OrderItem]) -> Decimal:
 ```python
 from fastapi import FastAPI, HTTPException, Query, Path
 from pydantic import BaseModel
-from typing import List, Optional
 
 app = FastAPI()
 
 # ✅ GOOD: Resource-based routing
 @app.get("/api/markets")
 async def get_markets(
-    status: Optional[str] = Query(None),
+    status: str | None = Query(None),
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0)
 ):
@@ -181,8 +185,7 @@ async def delete_market(market_id: str):
 ### Pydantic Models for Validation
 
 ```python
-from pydantic import BaseModel, EmailStr, Field, validator
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from datetime import datetime
 from enum import Enum
 
@@ -193,18 +196,23 @@ class MarketStatus(str, Enum):
     CLOSED = "closed"
 
 class CreateMarketRequest(BaseModel):
+    """DTO: mutable list OK for API validation."""
     name: str = Field(..., min_length=1, max_length=200)
     description: str = Field(..., min_length=1, max_length=2000)
     end_date: datetime
-    categories: List[str] = Field(..., min_items=1)
+    categories: list[str] = Field(..., min_length=1)
 
-    @validator("end_date")
-    def end_date_must_be_future(cls, v):
+    model_config = {"frozen": True}  # Immutable after validation
+
+    @field_validator("end_date")
+    @classmethod
+    def end_date_must_be_future(cls, v: datetime) -> datetime:
         if v <= datetime.now():
             raise ValueError("end_date must be in the future")
         return v
 
-class Market(BaseModel):
+class MarketResponse(BaseModel):
+    """API response DTO."""
     id: str
     name: str
     description: str
@@ -212,8 +220,7 @@ class Market(BaseModel):
     volume: float = 0.0
     created_at: datetime
 
-    class Config:
-        orm_mode = True  # Allow creation from ORM models
+    model_config = {"from_attributes": True}  # Allow creation from ORM models (Pydantic v2)
 
 # ❌ BAD: Using dicts without validation
 @app.post("/api/markets/bad")
@@ -222,42 +229,42 @@ async def create_market_bad(market: dict):
     return await market_service.create(market)
 ```
 
-## Repository Pattern with Async
+## Repository Pattern with Protocol
 
 ```python
-from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Protocol
+from collections.abc import Sequence
+
+# ✅ GOOD: Protocol for dependency inversion
+class MarketRepository(Protocol):
+    """Repository interface using Protocol (structural subtyping)."""
+
+    async def find_all(self, filters: dict | None = None) -> tuple[Market, ...]:
+        ...
+
+    async def find_by_id(self, market_id: str) -> Market | None:
+        ...
+
+    async def create(self, market_data: CreateMarketRequest) -> Market:
+        ...
+
+    async def update(self, market_id: str, market_data: UpdateMarketRequest) -> Market:
+        ...
+
+    async def delete(self, market_id: str) -> None:
+        ...
+
+# Implementation with SQLAlchemy
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
 
-# ✅ GOOD: Abstract repository pattern
-class MarketRepository(ABC):
-    @abstractmethod
-    async def find_all(self, filters: Optional[dict] = None) -> List[Market]:
-        pass
+class SQLAlchemyMarketRepository:
+    """Infrastructure implementation with side effects."""
 
-    @abstractmethod
-    async def find_by_id(self, market_id: str) -> Optional[Market]:
-        pass
-
-    @abstractmethod
-    async def create(self, market_data: CreateMarketRequest) -> Market:
-        pass
-
-    @abstractmethod
-    async def update(self, market_id: str, market_data: UpdateMarketRequest) -> Market:
-        pass
-
-    @abstractmethod
-    async def delete(self, market_id: str) -> None:
-        pass
-
-# Implementation with SQLAlchemy
-class SQLAlchemyMarketRepository(MarketRepository):
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def find_all(self, filters: Optional[dict] = None) -> List[Market]:
+    async def find_all(self, filters: dict | None = None) -> tuple[Market, ...]:
         query = select(MarketModel)
 
         if filters:
@@ -269,15 +276,16 @@ class SQLAlchemyMarketRepository(MarketRepository):
                 query = query.offset(filters["offset"])
 
         result = await self.session.execute(query)
-        return result.scalars().all()
+        markets = result.scalars().all()
+        return tuple(markets)  # Convert to immutable tuple
 
-    async def find_by_id(self, market_id: str) -> Optional[Market]:
+    async def find_by_id(self, market_id: str) -> Market | None:
         query = select(MarketModel).where(MarketModel.id == market_id)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
     async def create(self, market_data: CreateMarketRequest) -> Market:
-        market = MarketModel(**market_data.dict())
+        market = MarketModel(**market_data.model_dump())
         self.session.add(market)
         await self.session.commit()
         await self.session.refresh(market)
@@ -287,7 +295,7 @@ class SQLAlchemyMarketRepository(MarketRepository):
         query = (
             update(MarketModel)
             .where(MarketModel.id == market_id)
-            .values(**market_data.dict(exclude_unset=True))
+            .values(**market_data.model_dump(exclude_unset=True))
             .returning(MarketModel)
         )
         result = await self.session.execute(query)
@@ -330,7 +338,7 @@ async def get_market_service(
 @app.get("/api/markets")
 async def get_markets(
     service: MarketService = Depends(get_market_service),
-    status: Optional[str] = None
+    status: str | None = None
 ):
     markets = await service.find_all(status=status)
     return {"success": True, "data": markets}
@@ -347,7 +355,7 @@ async def get_current_user(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
+        user_id: str | None = payload.get("sub")
         if user_id is None:
             raise credentials_exception
     except JWTError:
@@ -366,7 +374,7 @@ async def get_profile(current_user: User = Depends(get_current_user)):
 ## Service Layer Pattern
 
 ```python
-from typing import List, Optional
+from decimal import Decimal
 
 # ✅ GOOD: Service layer with business logic
 class MarketService:
@@ -375,16 +383,17 @@ class MarketService:
 
     async def find_all(
         self,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 10,
         offset: int = 0
-    ) -> List[Market]:
+    ) -> tuple[Market, ...]:
+        """Find all markets with filters (returns immutable tuple)."""
         filters = {"limit": limit, "offset": offset}
         if status:
             filters["status"] = status
         return await self.repository.find_all(filters)
 
-    async def find_by_id(self, market_id: str) -> Optional[Market]:
+    async def find_by_id(self, market_id: str) -> Market | None:
         return await self.repository.find_by_id(market_id)
 
     async def create(self, market_data: CreateMarketRequest) -> Market:
@@ -400,16 +409,24 @@ class MarketService:
         self,
         query: str,
         limit: int = 10
-    ) -> List[Market]:
-        # Complex business logic
+    ) -> tuple[Market, ...]:
+        """Complex business logic with pure transformation."""
+        # I/O: Generate embedding
         embedding = await self.embedding_service.generate(query)
         results = await self.vector_search(embedding, limit)
-        market_ids = [r["id"] for r in results]
+
+        # Pure: Extract IDs using comprehension
+        market_ids = tuple(r["id"] for r in results)
         markets = await self.repository.find_by_ids(market_ids)
 
-        # Sort by similarity score
+        # Pure: Sort by similarity score
         score_map = {r["id"]: r["score"] for r in results}
-        return sorted(markets, key=lambda m: score_map.get(m.id, 0), reverse=True)
+        sorted_markets = sorted(
+            markets,
+            key=lambda m: score_map.get(m.id, Decimal("0")),
+            reverse=True
+        )
+        return tuple(sorted_markets)  # Return immutable tuple
 ```
 
 ## Error Handling Patterns
@@ -545,13 +562,15 @@ logger.info("User logged in", extra={"user_id": user.id})
 Use `extra` for structured data. Use lazy formatting (%) for performance.
 
 ```python
+from decimal import Decimal
+
 # ✅ GOOD: Structured logging (preferred)
 logger.info(
     "Order created",
     extra={
         "order_id": order.id,
         "user_id": order.user_id,
-        "total": str(order.total),
+        "total": str(order.total),  # Decimal → string
     },
 )
 
@@ -649,14 +668,15 @@ API_KEY = "sk-1234..."
 ```python
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List
+import asyncio
 
-# ✅ GOOD: Async queries
+# ✅ GOOD: Async queries with parallel execution
 async def get_markets_with_positions(
     db: AsyncSession,
     user_id: str
-) -> List[Market]:
-    # Fetch markets and positions in parallel
+) -> tuple[Market, ...]:
+    """Fetch markets and positions in parallel (pure transformation)."""
+    # Parallel I/O
     markets_query = select(MarketModel).where(MarketModel.status == "active")
     positions_query = select(PositionModel).where(PositionModel.user_id == user_id)
 
@@ -665,11 +685,13 @@ async def get_markets_with_positions(
         db.execute(positions_query)
     )
 
-    markets = markets_result.scalars().all()
-    positions = positions_result.scalars().all()
+    markets = tuple(markets_result.scalars().all())
+    positions = tuple(positions_result.scalars().all())
 
-    # Combine results
+    # Pure: Combine results
     position_map = {p.market_id: p for p in positions}
+
+    # Note: Mutating market objects here (side effect in infrastructure layer - OK)
     for market in markets:
         market.user_position = position_map.get(market.id)
 
@@ -695,14 +717,13 @@ async def get_markets_with_positions_bad(db: AsyncSession, user_id: str):
 ```python
 from redis.asyncio import Redis
 import json
-from typing import Optional
 
 # ✅ GOOD: Redis caching layer
 class CacheService:
     def __init__(self, redis: Redis):
         self.redis = redis
 
-    async def get(self, key: str) -> Optional[dict]:
+    async def get(self, key: str) -> dict | None:
         data = await self.redis.get(key)
         if data:
             return json.loads(data)
@@ -714,13 +735,13 @@ class CacheService:
     async def delete(self, key: str):
         await self.redis.delete(key)
 
-# Cached repository
-class CachedMarketRepository(MarketRepository):
+# Cached repository (decorator pattern)
+class CachedMarketRepository:
     def __init__(self, base_repo: MarketRepository, cache: CacheService):
         self.base_repo = base_repo
         self.cache = cache
 
-    async def find_by_id(self, market_id: str) -> Optional[Market]:
+    async def find_by_id(self, market_id: str) -> Market | None:
         cache_key = f"market:{market_id}"
 
         # Check cache
@@ -731,7 +752,7 @@ class CachedMarketRepository(MarketRepository):
         # Cache miss - fetch from database
         market = await self.base_repo.find_by_id(market_id)
         if market:
-            await self.cache.set(cache_key, market.dict(), ttl=300)
+            await self.cache.set(cache_key, market.model_dump(), ttl=300)
 
         return market
 
@@ -797,13 +818,19 @@ async def index_market(market_id: str):
 
 ```python
 import httpx
-import asyncio
+from pydantic import BaseModel
+
+class UserPayload(BaseModel):
+    id: str
+    name: str
+    email: str
 
 # ✅ GOOD: All async
-async def fetch_users(base_url: str) -> list[UserPayload]:
+async def fetch_users(base_url: str) -> tuple[UserPayload, ...]:
     async with httpx.AsyncClient(base_url=base_url) as client:
         response = await client.get("/users")
-        return [UserPayload(**u) for u in response.json()]
+        users = [UserPayload(**u) for u in response.json()]
+        return tuple(users)  # Return immutable tuple
 
 # ❌ BAD: Mixing sync and async - blocks event loop
 import requests
@@ -820,7 +847,7 @@ async def fetch_users_bad(base_url: str) -> list[UserPayload]:
 import aiofiles
 
 async def process_file(path: str) -> str:
-    async with aiofiles.open(path) as f:
+    async with aiofiles.open(path, encoding="utf-8") as f:
         return await f.read()
 
 # ❌ BAD: Synchronous I/O blocks event loop
@@ -899,15 +926,16 @@ MUST validate:
 - All data from external APIs
 
 ```python
-from pydantic import BaseModel, EmailStr, field_validator, validator
-from typing import List
+from pydantic import BaseModel, EmailStr, field_validator, Field
 
 # ✅ GOOD: Strict validation with Pydantic
 class CreateUserRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     email: EmailStr
     age: int = Field(..., ge=0, le=150)
-    tags: List[str] = Field(default_factory=list, max_items=10)
+    tags: list[str] = Field(default_factory=list, max_length=10)
+
+    model_config = {"frozen": True}
 
     @field_validator("name")
     @classmethod
@@ -954,7 +982,7 @@ def read_user_file(filename: str, allowed_dir: str) -> str:
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    with open(file_path) as f:
+    with open(file_path, encoding="utf-8") as f:
         return f.read()
 
 @app.get("/api/files/{filename}")
@@ -1012,15 +1040,16 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from collections.abc import AsyncGenerator
 
 # ✅ GOOD: Async test fixtures
 @pytest.fixture
-async def async_client():
+async def async_client() -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(app=app, base_url="http://test") as client:
         yield client
 
 @pytest.fixture
-async def test_db():
+async def test_db() -> AsyncGenerator[AsyncSession, None]:
     engine = create_async_engine("postgresql+asyncpg://test:test@localhost/test_db")
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -1047,6 +1076,8 @@ async def test_create_market(async_client: AsyncClient, test_db: AsyncSession):
     assert data["data"]["name"] == "Test Market"
 
 # ✅ GOOD: Mock dependencies
+from unittest.mock import Mock
+
 @pytest.mark.asyncio
 async def test_get_market_not_found(async_client: AsyncClient):
     async def mock_get_market_service():
@@ -1062,4 +1093,17 @@ async def test_get_market_not_found(async_client: AsyncClient):
     assert response.json()["success"] is False
 ```
 
-**Remember**: FastAPI combines Python's type system with async/await for high-performance APIs. Use Pydantic for validation, dependency injection for clean architecture, and async patterns for scalability.
+---
+
+**Key Principles**:
+
+1. **Domain purity**: Use `@dataclass(frozen=True)` + `tuple` for domain models
+2. **DTOs**: Use Pydantic `BaseModel` + `list` for API validation
+3. **Immutable returns**: Return `tuple` from repositories and services
+4. **Pure transformations**: Use comprehensions, avoid for loops with `.append()`
+5. **Decimal for money**: Always `Decimal` in domain, convert at boundaries
+6. **Protocol for DI**: Use `Protocol` for repository interfaces
+7. **Async all the way**: No sync I/O in async functions
+8. **Type safety**: Python 3.11+ union syntax (`|`), no `typing.List`/`Optional`
+
+**Remember**: FastAPI combines Python's type system with async/await for high-performance APIs. Follow coding-standards-python.md for functional programming principles while leveraging Pydantic for validation at boundaries.
