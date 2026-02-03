@@ -55,6 +55,7 @@ class User:
     id: str
     email: str
     name: str
+    age: int
     tags: tuple[str, ...]  # Immutable collection
 
 @dataclass(frozen=True)
@@ -133,7 +134,7 @@ adults = [user for user in users if user.age >= 18]
 user_map = {u.id: u.name for u in users}
 
 # ✅ Generator expression (memory efficient)
-total = sum(item.price * item.quantity for item in cart.items)
+total = sum(item.unit_price * item.quantity for item in cart.items)
 ```
 
 ### Map/Filter for Higher-Order Functions
@@ -145,7 +146,7 @@ from operator import attrgetter
 from typing import Sequence
 
 # ✅ map with function reference
-prices = tuple(map(attrgetter("price"), items))
+prices = tuple(map(attrgetter("unit_price"), items))
 
 # ✅ filter with predicate function
 def is_active(user: User) -> bool:
@@ -154,7 +155,7 @@ def is_active(user: User) -> bool:
 active_users = tuple(filter(is_active, users))
 
 # ❌ Avoid map/filter with lambda (use comprehension instead)
-prices = tuple(item.price for item in items)  # Better than map(lambda i: i.price, items)
+prices = tuple(item.unit_price for item in items)  # Better than map(lambda i: i.unit_price, items)
 ```
 
 ### Reduce for Aggregation (Last Resort)
@@ -166,7 +167,7 @@ from functools import reduce
 from operator import or_
 
 # ✅ Built-in aggregators (preferred)
-total = sum(item.price for item in items)
+total = sum(item.unit_price for item in items)
 has_errors = any(r.is_error for r in results)
 
 # ✅ Prefer built-in methods over reduce
@@ -205,19 +206,19 @@ validated = tuple(validate_user(u) for u in users)
 # ⚠️ Complex logic: readability trumps purity
 results = []
 for item in items:
-    if item.price > Decimal("100"):
-        discounted = item.price * Decimal("0.9")
+    if item.unit_price > Decimal("100"):
+        discounted = item.unit_price * Decimal("0.9")
         tax = discounted * Decimal("0.1")
         results.append({"price": discounted, "tax": tax})
     else:
-        results.append({"price": item.price, "tax": Decimal("0")})
+        results.append({"price": item.unit_price, "tax": Decimal("0")})
 
 # If this becomes unreadable, extract a function:
 def calculate_pricing(item: OrderItem) -> dict[str, Decimal]:
-    if item.price > Decimal("100"):
-        discounted = item.price * Decimal("0.9")
+    if item.unit_price > Decimal("100"):
+        discounted = item.unit_price * Decimal("0.9")
         return {"price": discounted, "tax": discounted * Decimal("0.1")}
-    return {"price": item.price, "tax": Decimal("0")}
+    return {"price": item.unit_price, "tax": Decimal("0")}
 
 results = [calculate_pricing(item) for item in items]
 ```
@@ -735,15 +736,18 @@ Use when you want to make failure explicit in return types (library code, valida
 
 ```python
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Generic, TypeAlias, TypeVar
+
+T = TypeVar("T")
+E = TypeVar("E")
 
 @dataclass(frozen=True)
-class Success[T]:
+class Success(Generic[T]):
     """Generic success wrapper."""
     value: T
 
 @dataclass(frozen=True)
-class Failure[E]:
+class Failure(Generic[E]):
     """Generic failure wrapper."""
     error: E
 

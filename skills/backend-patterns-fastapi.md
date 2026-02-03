@@ -1,1109 +1,1346 @@
 ---
 name: backend-patterns-fastapi
-description: Backend architecture patterns and best practices for FastAPI. Type-safe async APIs, dependency injection, Pydantic models, and database integration.
+description: FastAPI with Clojure-inspired architecture using SQLAlchemy Core (no ORM) - data-centric, pure functions, explicit SQL-to-Domain conversion. Hexagonal architecture with functional core for production-ready backends.
 ---
 
-# FastAPI Backend Patterns
+# FastAPI Backend Architecture (SQLAlchemy Core)
 
-Backend architecture patterns for FastAPI applications with async/await, Pydantic validation, and modern Python practices. Follows coding-standards-python.md for functional programming principles.
+**Clojure-inspired backend architecture for FastAPI**: data-centric, pure functions at the core, side effects isolated at boundaries. Based on Hexagonal Architecture (Ports & Adapters).
 
-## Architecture Principles
+**Philosophy**: "Functional Core, Imperative Shell" - pure domain logic at the core, orchestration in use cases, side effects (DB, HTTP, external APIs) at the adapter boundaries.
 
-### Separate Pure Logic from I/O
+**DB Strategy**: SQLAlchemy Core (async) - NO ORM. Explicit SQL → Domain conversion for transparency and Clojure-style data transformation.
 
-Keep business logic pure and free from I/O dependencies. Push side effects to the boundaries.
+---
+
+## Required Libraries
+
+**Python**: 3.11+ (for `|` union syntax, `Self`, better async performance)
+
+| Layer | Libraries | Purpose |
+|-------|-----------|---------|
+| **API** | `fastapi>=0.104.0`, `pydantic>=2.5.0`, `pydantic-settings>=2.1.0` | HTTP routing, validation, config |
+| **Domain** | `dataclasses` (stdlib), `decimal` (stdlib), `datetime` (stdlib) | Pure business logic |
+| **Use Cases** | `typing.Protocol` (stdlib) | Port definitions |
+| **Adapters (DB)** | `sqlalchemy[asyncio]>=2.0.23` (Core only, **NO ORM**), `asyncpg>=0.29.0`, `alembic>=1.12.0` | Async SQL queries, migrations |
+| **Adapters (HTTP)** | `httpx>=0.25.0` | Async HTTP client |
+| **Testing** | `pytest>=7.4.0`, `pytest-asyncio>=0.21.0` | Async tests |
+| **Utils** | `structlog>=23.2.0`, `tenacity>=8.2.0` (optional), `orjson>=3.9.0` (optional) | Logging, retries, fast JSON |
+
+**Critical**: Use **SQLAlchemy Core** with `Table` + `MetaData`. Do NOT use ORM (`DeclarativeBase`, `relationship()`, mapped classes).
+
+---
+
+## Design Philosophy (Clojure Heritage)
+
+### 1. Data-Centric Domain
+
+* **Domain = "Data + Pure Functions"**
+  * Treat `dataclass` as immutable values (frozen)
+  * Domain calculations have **NO I/O** (no DB, HTTP, `datetime.now()`, `random`, `uuid.uuid4()`)
+  * Business logic is testable without mocks
 
 ```python
+# domain/models.py
 from decimal import Decimal
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
-# ✅ Pure domain logic (no I/O)
-def calculate_discount(price: Decimal, user_tier: str) -> Decimal:
-    if user_tier == "premium":
-        return price * Decimal("0.9")
-    return price
-
-# ✅ I/O at boundaries
-async def apply_discount_to_order(
-    order_id: str,
-    repository: OrderRepository
-) -> Order:
-    order = await repository.get(order_id)  # I/O
-    discounted_price = calculate_discount(order.price, order.user.tier)  # Pure
-    updated_order = replace(order, price=discounted_price)  # Immutable update
-    await repository.save(updated_order)  # I/O
-    return updated_order
-```
-
-### Domain Layer Must Not Depend on Infrastructure
-
-Domain models and business logic MUST NOT import database, HTTP, or framework code.
-
-```python
-from dataclasses import dataclass, replace
-from decimal import Decimal
-
-# ✅ GOOD: Pure domain models (frozen dataclass + tuple)
 @dataclass(frozen=True)
 class OrderItem:
-    product_id: str
+    unit_price: Decimal
     quantity: int
-    price: Decimal
-
-    @property
-    def subtotal(self) -> Decimal:
-        return self.price * self.quantity
 
 @dataclass(frozen=True)
 class Order:
     id: str
-    items: tuple[OrderItem, ...]  # Immutable collection
-    total: Decimal
+    items: tuple[OrderItem, ...]
+    user_tier: str
 
-    def add_item(self, item: OrderItem) -> "Order":
-        """Pure function: returns new Order with added item."""
-        new_total = self.total + item.subtotal
-        return replace(
-            self,
-            items=(*self.items, item),  # Tuple concatenation
-            total=new_total
-        )
+    @property
+    def total(self) -> Decimal:
+        return sum((item.unit_price * item.quantity for item in self.items), start=Decimal("0"))
 
-# ❌ BAD: Domain model depending on infrastructure
-from sqlalchemy.orm import Session
-
-class OrderBad:
-    # Domain logic should not know about database sessions
-    def save(self, db: Session) -> None:
-        db.add(self)
-        db.commit()
+# domain/services/discount.py
+def calculate_discount(order: Order) -> Decimal:
+    """Pure function: same input → same output, no side effects."""
+    rate = Decimal("0.1") if order.user_tier == "premium" else Decimal("0")
+    return order.total * rate
 ```
 
-**Domain vs DTO distinction**:
-- **Domain models**: Use `@dataclass(frozen=True)` with `tuple` for collections
-- **DTOs (Pydantic)**: Use `BaseModel` with `list` for API validation (mutable OK)
+### 2. Unidirectional Dependencies (Dependency Inversion)
 
-### Avoid Passing Raw Dicts Across Boundaries
+Dependencies point **inward** (toward domain core). Outer layers depend on inner layer abstractions (Ports).
 
-Use Pydantic models for data crossing layer boundaries.
+```
+┌─────────────────────────────────────┐
+│   API Layer                         │  ← FastAPI routes, HTTP
+│   - Pydantic DTOs, validation       │  depends on ↓
+└──────────────┬──────────────────────┘
+┌──────────────▼──────────────────────┐
+│   Use Cases                         │  ← Orchestration, calls ports
+│   - Defines Port interfaces         │  depends on ↓
+└──────────────┬──────────────────────┘
+┌──────────────▼──────────────────────┐
+│   Domain (Core)                     │  ← Pure business logic
+│   - Immutable models, pure functions│  ✅ NO outer layer imports
+└─────────────────────────────────────┘
+               ↑ implements ports
+┌──────────────┴──────────────────────┐
+│   Adapters                          │  ← Side effects (DB, APIs)
+│   - SQLAlchemy Core (NO ORM)        │  ← Explicit SQL → Domain
+└─────────────────────────────────────┘
+```
+
+**Rules**: `domain` imports nothing from outer layers. `usecases` imports domain + defines ports. `adapters` implements ports. `api` wires dependencies.
+
+---
+
+## Directory Structure
+
+```
+src/app/
+  main.py                  # FastAPI app, DI setup
+
+  api/                     # HTTP boundary
+    routes/, deps.py
+    schemas/               # Pydantic DTOs
+    adapters/              # DTO ↔ Domain conversion
+    errors.py              # HTTP exception mapping
+
+  domain/                  # Pure business logic
+    models.py              # Immutable dataclasses
+    errors.py              # Domain exceptions
+    services/              # Pure functions
+
+  usecases/                # Orchestration
+    user/
+      create_user.py       # Use case (transaction boundary)
+      ports.py             # Port interfaces (Protocol)
+    shared/ports.py        # UnitOfWork, Clock, IdGenerator
+
+  adapters/                # Infrastructure
+    db/
+      session.py           # AsyncEngine, async_session_maker
+      tables.py            # SQLAlchemy Core Table definitions
+      user_repo.py         # Repository implementation (Core)
+      uow.py               # Unit of Work
+      migrations/          # Alembic
+    external/, cache/
+
+  shared/
+    clock.py, idgen.py, logging.py, settings.py
+```
+
+**Critical Rules**: `domain/` NO Pydantic/SQLAlchemy/HTTP. `usecases/` NO adapters imports. DB schemas defined with `Table` (not ORM models).
+
+---
+
+## Why SQLAlchemy Core (Not ORM)
+
+### Problems with ORM
+- **Stateful entities**: Lazy loading, session-bound state, implicit queries
+- **Impure boundaries**: Domain models mixed with DB concerns (relationships, `Session` dependencies)
+- **Opaque behavior**: Hard to reason about what SQL runs when
+- **Clojure mismatch**: ORM promotes mutability and side effects in domain layer
+
+### Benefits of Core
+- **Explicit SQL**: You see exactly what queries run
+- **Pure data flow**: SQL Row → Dict/Mapping → Domain (explicit transformation)
+- **No hidden state**: Domain models are pure dataclasses with no DB dependencies
+- **Parameterized safety**: Same protection against SQL injection as ORM
+- **Async native**: `asyncpg` integration without ORM overhead
+- **Dialect abstraction**: Still portable across DB backends
+
+### Core API Requirements
+
+**✅ REQUIRED (Use these)**:
+- `Table` + `MetaData` for schema definitions
+- `select()`, `insert()`, `update()`, `delete()` for queries
+- `AsyncSession` with `session.execute(query)`
+- `result.mappings()` for dict-like row access
+- `.returning()` for INSERT/UPDATE (PostgreSQL/MySQL 8.0.1+/SQLite 3.35+)
+- Explicit `_row_to_domain()` converters in Repository
+
+**❌ PROHIBITED (Do NOT use)**:
+- `DeclarativeBase` or any ORM base classes
+- `relationship()` for foreign key navigation
+- Mapped classes (`class User(Base)`)
+- `Session.query()` or ORM query methods
+- Lazy loading or session-bound entities
+- Automatic eager loading or joinedload
+
+**⚠️ OPTIONAL (Advanced)**:
+- `AsyncConnection` instead of `AsyncSession` for lower-level control
+- Raw SQL with `text()` for complex queries (still use parameter binding)
+- CTE (Common Table Expressions) with `.cte()`
+- Window functions for analytics
+
+### Pattern: Row → Domain Conversion
 
 ```python
-from pydantic import BaseModel
+# adapters/db/user_repo.py
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from adapters.db.tables import users
+from domain.models import User
 
-# ✅ GOOD: Typed models (DTOs for API)
+class SQLAlchemyUserRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def find_by_id(self, user_id: str) -> User | None:
+        query = select(users).where(users.c.id == user_id)
+        result = await self.session.execute(query)
+        row = result.mappings().one_or_none()
+        return self._row_to_domain(row) if row else None
+
+    def _row_to_domain(self, row) -> User:
+        """Explicit Row → Domain conversion."""
+        return User(
+            id=row["id"],
+            name=row["name"],
+            email=row["email"],
+            age=row["age"],
+            tags=tuple(row["tags"]),  # DB array → tuple
+            created_at=row["created_at"]
+        )
+```
+
+**Key principle**: Repository adapters handle SQL ↔ Domain translation. Domain never imports SQLAlchemy. Repository holds `self.session` and all methods use it.
+
+---
+
+## Exception Design (Unified)
+
+```python
+# domain/errors.py
+class DomainError(Exception):
+    """Base for all domain errors."""
+
+class ValidationError(DomainError):
+    """Domain validation failure."""
+    def __init__(self, errors: tuple[str, ...] | str):
+        msg = "; ".join(errors) if isinstance(errors, tuple) else errors
+        super().__init__(msg)
+        self.errors = errors if isinstance(errors, tuple) else (errors,)
+
+class NotFoundError(DomainError): pass
+class ConflictError(DomainError): pass
+class BusinessRuleViolation(DomainError): pass
+
+# api/errors.py - Map to HTTP
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from domain.errors import NotFoundError, ConflictError, ValidationError
+
+@app.exception_handler(NotFoundError)
+async def not_found_handler(request: Request, exc: NotFoundError):
+    return JSONResponse(status_code=404, content={"error": str(exc)})
+
+@app.exception_handler(ConflictError)
+async def conflict_handler(request: Request, exc: ConflictError):
+    return JSONResponse(status_code=409, content={"error": str(exc)})
+
+@app.exception_handler(ValidationError)
+async def validation_handler(request: Request, exc: ValidationError):
+    return JSONResponse(status_code=422, content={"errors": exc.errors})
+```
+
+---
+
+## Transaction Management (Unit of Work)
+
+**Use case controls transaction via UoW. Repository does NOT commit (only execute).**
+
+```python
+# usecases/shared/ports.py
+from typing import Protocol
+
+class UnitOfWork(Protocol):
+    """Transaction boundary. Use case controls commit/rollback."""
+    async def __aenter__(self) -> "UnitOfWork": ...
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None: ...
+
+# adapters/db/uow.py
+from sqlalchemy.ext.asyncio import AsyncSession
+
+class SQLAlchemyUnitOfWork:
+    """Commits on success, rolls back on exception."""
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            await self.session.commit()
+        else:
+            await self.session.rollback()
+```
+
+**NOTE**: Repository methods execute queries but do NOT commit. UoW handles commit/rollback at use case boundary.
+
+---
+
+## DateTime Standards
+
+**Always timezone-aware UTC. Domain uses Clock port.**
+
+```python
+# shared/clock.py
+from datetime import datetime, timezone
+
+class SystemClock:
+    def now(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+class FixedClock:
+    def __init__(self, fixed_time: datetime):
+        if fixed_time.tzinfo is None:
+            raise ValueError("Must be timezone-aware")
+        self._time = fixed_time
+    def now(self) -> datetime:
+        return self._time
+
+# API validation (Pydantic v2)
+from pydantic import field_validator
+
+@field_validator("end_date")
+@classmethod
+def end_date_must_be_future(cls, v: datetime) -> datetime:
+    now = datetime.now(timezone.utc)
+    if v.tzinfo is None:
+        v = v.replace(tzinfo=timezone.utc)
+    if v <= now:
+        raise ValueError("end_date must be in the future")
+    return v
+```
+
+---
+
+## DTO vs Domain
+
+**API DTOs**: Pydantic `BaseModel`, `list`/`dict` for JSON. Validation-focused.
+**Domain Models**: `@dataclass(frozen=True)`, `tuple`/`frozenset`. Business logic-focused.
+
+**DTO Policy**: Use `model_config = {"frozen": True}` for Pydantic v2 request DTOs to prevent accidental mutation after validation. **Limitation**: Does NOT provide true immutability—only prevents attribute assignment. Internal `list`/`dict` fields remain mutable.
+
+```python
+# api/schemas/user.py (DTO)
+from pydantic import BaseModel, Field, EmailStr
+
 class CreateUserRequest(BaseModel):
-    name: str
-    email: str
-    role: str = "user"
-
-    model_config = {"frozen": True}  # Immutable after validation
+    name: str = Field(min_length=1, max_length=100)
+    email: EmailStr
+    age: int = Field(ge=0, le=150)
+    tags: list[str] = Field(default_factory=list)
+    model_config = {"frozen": True}
 
 class UserResponse(BaseModel):
     id: str
     name: str
     email: str
-    role: str
+    age: int
+    tags: list[str]
+    created_at: str  # ISO 8601 format
 
-async def create_user(request: CreateUserRequest) -> UserResponse:
-    # Type-safe
-    pass
-
-# ❌ BAD: Using raw dicts
-async def create_user_bad(data: dict) -> dict:
-    # Unsafe - no type checking
-    pass
-```
-
-### Side Effects Must Be Explicit
-
-Functions with side effects SHOULD indicate this in naming or return type.
-
-```python
-# ✅ GOOD: Clear side effect in name
-async def send_email_notification(user_id: str) -> None:
-    pass
-
-async def save_user_to_database(user: User) -> None:
-    pass
-
-# ✅ GOOD: Pure function - no side effects
-def format_email_body(user: User) -> str:
-    pass
-
-def calculate_total_price(items: tuple[OrderItem, ...]) -> Decimal:
-    return sum((item.subtotal for item in items), start=Decimal("0"))
-```
-
-## API Design with FastAPI
-
-### RESTful Route Structure
-
-```python
-from fastapi import FastAPI, HTTPException, Query, Path
-from pydantic import BaseModel
-
-app = FastAPI()
-
-# ✅ GOOD: Resource-based routing
-@app.get("/api/markets")
-async def get_markets(
-    status: str | None = Query(None),
-    limit: int = Query(10, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-):
-    """List all markets with filtering and pagination."""
-    markets = await market_service.find_all(status=status, limit=limit, offset=offset)
-    return {"success": True, "data": markets}
-
-@app.get("/api/markets/{market_id}")
-async def get_market(market_id: str = Path(..., min_length=1)):
-    """Get a single market by ID."""
-    market = await market_service.find_by_id(market_id)
-    if not market:
-        raise HTTPException(status_code=404, detail="Market not found")
-    return {"success": True, "data": market}
-
-@app.post("/api/markets")
-async def create_market(market: CreateMarketRequest):
-    """Create a new market."""
-    created = await market_service.create(market)
-    return {"success": True, "data": created}
-
-@app.put("/api/markets/{market_id}")
-async def update_market(market_id: str, market: UpdateMarketRequest):
-    """Update an existing market."""
-    updated = await market_service.update(market_id, market)
-    return {"success": True, "data": updated}
-
-@app.delete("/api/markets/{market_id}")
-async def delete_market(market_id: str):
-    """Delete a market."""
-    await market_service.delete(market_id)
-    return {"success": True}
-```
-
-### Pydantic Models for Validation
-
-```python
-from pydantic import BaseModel, EmailStr, Field, field_validator
+# domain/models.py (Domain)
+from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
 
-# ✅ GOOD: Strict type definitions
-class MarketStatus(str, Enum):
-    ACTIVE = "active"
-    RESOLVED = "resolved"
-    CLOSED = "closed"
+@dataclass(frozen=True)
+class NewUser:
+    """User before persistence - id and created_at not yet set."""
+    name: str
+    email: str
+    age: int
+    tags: tuple[str, ...]
 
-class CreateMarketRequest(BaseModel):
-    """DTO: mutable list OK for API validation."""
-    name: str = Field(..., min_length=1, max_length=200)
-    description: str = Field(..., min_length=1, max_length=2000)
-    end_date: datetime
-    categories: list[str] = Field(..., min_length=1)
-
-    model_config = {"frozen": True}  # Immutable after validation
-
-    @field_validator("end_date")
-    @classmethod
-    def end_date_must_be_future(cls, v: datetime) -> datetime:
-        if v <= datetime.now():
-            raise ValueError("end_date must be in the future")
-        return v
-
-class MarketResponse(BaseModel):
-    """API response DTO."""
+@dataclass(frozen=True)
+class User:
+    """User after persistence - fully populated with id and created_at."""
     id: str
     name: str
-    description: str
-    status: MarketStatus
-    volume: float = 0.0
-    created_at: datetime
+    email: str
+    age: int
+    tags: tuple[str, ...]
+    created_at: datetime  # Always set (NOT NULL in DB)
 
-    model_config = {"from_attributes": True}  # Allow creation from ORM models (Pydantic v2)
+# api/adapters/user_adapter.py (Conversion)
+from api.schemas.user import CreateUserRequest, UserResponse
+from domain.models import NewUser, User
 
-# ❌ BAD: Using dicts without validation
-@app.post("/api/markets/bad")
-async def create_market_bad(market: dict):
-    # No validation, type safety, or documentation
-    return await market_service.create(market)
+def to_domain_new_user(req: CreateUserRequest) -> NewUser:
+    """DTO → NewUser (before persistence). No id/created_at yet."""
+    return NewUser(
+        name=req.name,
+        email=req.email,
+        age=req.age,
+        tags=tuple(req.tags),
+    )
+
+def from_domain_user(user: User) -> UserResponse:
+    """User (after persistence) → DTO. All fields guaranteed non-null."""
+    return UserResponse(
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        age=user.age,
+        tags=list(user.tags),
+        created_at=user.created_at.isoformat()  # Always present
+    )
 ```
 
-## Repository Pattern with Protocol
+**NOTE**: Separate types for pre/post-persistence state. `NewUser` has no `id`/`created_at`. Use case converts `NewUser` → `User` (with id/created_at from IdGenerator/Clock) before calling Repository. This ensures type safety and eliminates `None` handling in persistence layer.
+
+---
+
+## Complete Flow: Create User (SQLAlchemy Core)
+
+### 1. API Layer
 
 ```python
+# api/routes/users.py
+from fastapi import APIRouter, Depends, status
+from api.schemas.user import CreateUserRequest, UserResponse
+from api.adapters.user_adapter import to_domain_new_user, from_domain_user
+from api.deps import get_create_user_use_case
+from usecases.user.create_user import CreateUserUseCase
+
+router = APIRouter()
+
+@router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    request: CreateUserRequest,
+    use_case: CreateUserUseCase = Depends(get_create_user_use_case)
+):
+    new_user = to_domain_new_user(request)
+    created_user = await use_case.execute(new_user)
+    return from_domain_user(created_user)
+```
+
+### 2. Use Case (Orchestration + Transaction)
+
+```python
+# usecases/user/create_user.py
+from domain.models import NewUser, User
+from domain.errors import ValidationError, ConflictError
+from domain.services.user_rules import validate_new_user
+from usecases.user.ports import UserRepository
+from usecases.shared.ports import UnitOfWork, Clock, IdGenerator
+
+class CreateUserUseCase:
+    def __init__(self, repo: UserRepository, uow: UnitOfWork,
+                 clock: Clock, id_gen: IdGenerator):
+        self.repo, self.uow, self.clock, self.id_gen = repo, uow, clock, id_gen
+
+    async def execute(self, new_user: NewUser) -> User:
+        """Accept NewUser (before persistence), return User (after persistence)."""
+        async with self.uow:
+            # Pure: Validate
+            errors = validate_new_user(new_user)
+            if errors:
+                raise ValidationError(errors)
+
+            # I/O: Check uniqueness
+            if await self.repo.find_by_email(new_user.email):
+                raise ConflictError(f"Email {new_user.email} exists")
+
+            # Pure: Convert NewUser → User with id/created_at
+            user = User(
+                id=self.id_gen.generate(),
+                name=new_user.name,
+                email=new_user.email,
+                age=new_user.age,
+                tags=new_user.tags,
+                created_at=self.clock.now()
+            )
+
+            # I/O: Persist (repository receives fully populated User)
+            return await self.repo.create(user)
+```
+
+### 3. Ports (Protocol)
+
+```python
+# usecases/user/ports.py
 from typing import Protocol
-from collections.abc import Sequence
+from domain.models import User
 
-# ✅ GOOD: Protocol for dependency inversion
-class MarketRepository(Protocol):
-    """Repository interface using Protocol (structural subtyping)."""
+class UserRepository(Protocol):
+    async def find_by_id(self, user_id: str) -> User | None: ...
+    async def find_by_email(self, email: str) -> User | None: ...
+    async def create(self, user: User) -> User: ...
+    async def update(self, user: User) -> User: ...  # Uses user.id (no duplicate id parameter)
 
-    async def find_all(self, filters: dict | None = None) -> tuple[Market, ...]:
-        ...
+# usecases/shared/ports.py (shared ports)
+from typing import Protocol
+from datetime import datetime
 
-    async def find_by_id(self, market_id: str) -> Market | None:
-        ...
+class Clock(Protocol):
+    def now(self) -> datetime: ...
 
-    async def create(self, market_data: CreateMarketRequest) -> Market:
-        ...
+class IdGenerator(Protocol):
+    def generate(self) -> str: ...
 
-    async def update(self, market_id: str, market_data: UpdateMarketRequest) -> Market:
-        ...
+class UnitOfWork(Protocol):
+    """Transaction boundary. Defined once in shared/ports.py."""
+    async def __aenter__(self) -> "UnitOfWork": ...
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None: ...
+```
 
-    async def delete(self, market_id: str) -> None:
-        ...
+### 4. Domain (Pure Logic)
 
-# Implementation with SQLAlchemy
+```python
+# domain/models.py
+from dataclasses import dataclass
+from datetime import datetime
+
+@dataclass(frozen=True)
+class NewUser:
+    """User before persistence - id and created_at not yet set."""
+    name: str
+    email: str
+    age: int
+    tags: tuple[str, ...]
+
+@dataclass(frozen=True)
+class User:
+    """User after persistence - fully populated."""
+    id: str
+    name: str
+    email: str
+    age: int
+    tags: tuple[str, ...]
+    created_at: datetime  # Always set (NOT NULL in DB)
+
+# domain/services/user_rules.py
+from domain.models import NewUser
+
+def validate_new_user(new_user: NewUser) -> tuple[str, ...]:
+    """Pure function: no I/O, same input → same output."""
+    errors = []
+    if not new_user.name.strip():
+        errors.append("Name cannot be empty")
+    if new_user.age < 0 or new_user.age > 150:
+        errors.append("Age must be 0-150")
+    if "@" not in new_user.email:
+        errors.append("Invalid email")
+    return tuple(errors)
+```
+
+### 5. Adapter (Infrastructure - SQLAlchemy Core)
+
+```python
+# adapters/db/tables.py (Schema definition with Core)
+from sqlalchemy import MetaData, Table, Column, String, Integer, TIMESTAMP
+from sqlalchemy.dialects.postgresql import ARRAY
+
+metadata = MetaData()
+
+users = Table(
+    "users",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("name", String, nullable=False),
+    Column("email", String, unique=True, nullable=False),
+    Column("age", Integer, nullable=False),
+    Column("tags", ARRAY(String), nullable=False),
+    Column("created_at", TIMESTAMP(timezone=True), nullable=False),
+)
+
+# adapters/db/user_repo.py (Repository using Core)
+from sqlalchemy import select, insert, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from domain.models import User
+from domain.errors import NotFoundError
+from adapters.db.tables import users
+
+class SQLAlchemyUserRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def find_by_id(self, user_id: str) -> User | None:
+        query = select(users).where(users.c.id == user_id)
+        result = await self.session.execute(query)
+        row = result.mappings().one_or_none()
+        return self._row_to_domain(row) if row else None
+
+    async def find_by_email(self, email: str) -> User | None:
+        query = select(users).where(users.c.email == email)
+        result = await self.session.execute(query)
+        row = result.mappings().one_or_none()
+        return self._row_to_domain(row) if row else None
+
+    async def create(self, user: User) -> User:
+        """Insert and return created user using RETURNING.
+
+        NOTE: RETURNING is supported in PostgreSQL (all versions), MySQL 8.0.1+,
+        SQLite 3.35+. For older databases or drivers without RETURNING support,
+        use INSERT followed by SELECT (see create_without_returning example).
+        """
+        query = (
+            insert(users)
+            .values(
+                id=user.id,
+                name=user.name,
+                email=user.email,
+                age=user.age,
+                tags=list(user.tags),  # tuple → list for DB
+                created_at=user.created_at
+            )
+            .returning(users)
+        )
+        result = await self.session.execute(query)
+        row = result.mappings().one()
+        return self._row_to_domain(row)
+
+    async def update(self, user: User) -> User:
+        """Update and return updated user using RETURNING. Uses user.id."""
+        query = (
+            update(users)
+            .where(users.c.id == user.id)
+            .values(
+                name=user.name,
+                email=user.email,
+                age=user.age,
+                tags=list(user.tags)
+            )
+            .returning(users)
+        )
+        result = await self.session.execute(query)
+        row = result.mappings().one_or_none()
+        if not row:
+            raise NotFoundError(f"User {user.id} not found")
+        return self._row_to_domain(row)
+
+    def _row_to_domain(self, row) -> User:
+        """Convert SQLAlchemy Row/Mapping to Domain model."""
+        return User(
+            id=row["id"],
+            name=row["name"],
+            email=row["email"],
+            age=row["age"],
+            tags=tuple(row["tags"]),  # list → tuple
+            created_at=row["created_at"]
+        )
+
+    async def create_without_returning(self, user: User) -> User:
+        """Alternative for databases/drivers without RETURNING support.
+
+        Uses INSERT then SELECT pattern. Slightly less efficient but
+        compatible with older database versions.
+        """
+        query = insert(users).values(
+            id=user.id, name=user.name, email=user.email,
+            age=user.age, tags=list(user.tags), created_at=user.created_at
+        )
+        await self.session.execute(query)
+        # Fetch inserted row
+        return await self.find_by_id(user.id)
+```
+
+### 6. DI Wiring
+
+```python
+# api/deps.py
+from typing import AsyncGenerator
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from adapters.db.session import async_session_maker
+from usecases.user.ports import UserRepository
+from usecases.shared.ports import UnitOfWork, Clock, IdGenerator
+from adapters.db.user_repo import SQLAlchemyUserRepository
+from adapters.db.uow import SQLAlchemyUnitOfWork
+from shared.clock import SystemClock
+from shared.idgen import UUIDGenerator
+from usecases.user.create_user import CreateUserUseCase
+
+# NOTE: FastAPI dependency injection caches results per request by default.
+# When multiple dependencies call Depends(get_db), FastAPI returns the SAME
+# AsyncSession instance for that request, ensuring:
+# 1 HTTP request = 1 session = 1 transaction boundary.
+# To disable caching, use Depends(get_db, use_cache=False).
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Single source of AsyncSession per request."""
+    async with async_session_maker() as session:
+        yield session
+
+async def get_user_repository(db: AsyncSession = Depends(get_db)) -> UserRepository:
+    """Repository shares session from get_db."""
+    return SQLAlchemyUserRepository(db)
+
+async def get_uow(db: AsyncSession = Depends(get_db)) -> UnitOfWork:
+    """UoW shares SAME session from get_db (cached by FastAPI)."""
+    return SQLAlchemyUnitOfWork(db)
+
+def get_clock() -> Clock:
+    return SystemClock()
+
+def get_id_generator() -> IdGenerator:
+    return UUIDGenerator()
+
+async def get_create_user_use_case(
+    repo: UserRepository = Depends(get_user_repository),
+    uow: UnitOfWork = Depends(get_uow),
+    clock: Clock = Depends(get_clock),
+    id_gen: IdGenerator = Depends(get_id_generator)
+) -> CreateUserUseCase:
+    return CreateUserUseCase(repo, uow, clock, id_gen)
+```
+
+---
+
+## Repository Pattern (SQLAlchemy Core)
+
+```python
+# domain/models.py (add Market)
+from dataclasses import dataclass
+from datetime import datetime
+
+@dataclass(frozen=True)
+class NewMarket:
+    """Market before persistence - id and created_at not yet set."""
+    name: str
+    description: str | None
+    status: str
+
+@dataclass(frozen=True)
+class Market:
+    """Market after persistence - fully populated."""
+    id: str
+    name: str
+    description: str | None
+    status: str
+    created_at: datetime  # Always set (NOT NULL in DB)
+
+# usecases/market/ports.py (Port - Protocol)
+from typing import Protocol
+from domain.models import Market
+
+class MarketRepository(Protocol):
+    async def find_all(self, filters: dict | None = None) -> tuple[Market, ...]: ...
+    async def find_by_id(self, market_id: str) -> Market | None: ...
+    async def create(self, market: Market) -> Market: ...
+    async def update(self, market: Market) -> Market: ...
+
+# domain/services/market_rules.py (Pure validation)
+from domain.models import NewMarket
+
+def validate_new_market(new_market: NewMarket) -> tuple[str, ...]:
+    """Pure function: no I/O, same input → same output."""
+    errors = []
+    if not new_market.name.strip():
+        errors.append("Market name cannot be empty")
+    if new_market.status not in ("active", "inactive", "archived"):
+        errors.append("Status must be one of: active, inactive, archived")
+    return tuple(errors)
+
+# usecases/market/create_market.py (Use Case example)
+from domain.models import NewMarket, Market
+from domain.errors import ValidationError
+from domain.services.market_rules import validate_new_market
+from usecases.market.ports import MarketRepository
+from usecases.shared.ports import UnitOfWork, Clock, IdGenerator
+
+class CreateMarketUseCase:
+    def __init__(self, repo: MarketRepository, uow: UnitOfWork,
+                 clock: Clock, id_gen: IdGenerator):
+        self.repo, self.uow, self.clock, self.id_gen = repo, uow, clock, id_gen
+
+    async def execute(self, new_market: NewMarket) -> Market:
+        """Accept NewMarket (before persistence), return Market (after persistence)."""
+        async with self.uow:
+            # Pure: Validate
+            errors = validate_new_market(new_market)
+            if errors:
+                raise ValidationError(errors)
+
+            # Pure: Convert NewMarket → Market with id/created_at
+            market = Market(
+                id=self.id_gen.generate(),
+                name=new_market.name,
+                description=new_market.description,
+                status=new_market.status,
+                created_at=self.clock.now()
+            )
+
+            # I/O: Persist
+            return await self.repo.create(market)
+
+# adapters/db/tables.py (add Market table)
+from sqlalchemy import MetaData, Table, Column, String, TIMESTAMP
+
+# metadata is shared across all tables (defined once in tables.py)
+# from adapters.db.tables import metadata
+
+markets = Table(
+    "markets",
+    metadata,  # Uses the same metadata instance from tables.py
+    Column("id", String, primary_key=True),
+    Column("name", String, nullable=False),
+    Column("description", String, nullable=True),
+    Column("status", String, nullable=False),
+    Column("created_at", TIMESTAMP(timezone=True), nullable=False),
+)
+
+# adapters/db/market_repo.py (Adapter - Core implementation)
+from sqlalchemy import select, insert, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from domain.models import Market
+from domain.errors import NotFoundError
+from adapters.db.tables import markets
 
 class SQLAlchemyMarketRepository:
-    """Infrastructure implementation with side effects."""
-
     def __init__(self, session: AsyncSession):
         self.session = session
 
     async def find_all(self, filters: dict | None = None) -> tuple[Market, ...]:
-        query = select(MarketModel)
-
+        query = select(markets)
         if filters:
             if "status" in filters:
-                query = query.where(MarketModel.status == filters["status"])
-            if "limit" in filters:
-                query = query.limit(filters["limit"])
-            if "offset" in filters:
-                query = query.offset(filters["offset"])
-
+                query = query.where(markets.c.status == filters["status"])
         result = await self.session.execute(query)
-        markets = result.scalars().all()
-        return tuple(markets)  # Convert to immutable tuple
+        rows = result.mappings().all()
+        return tuple(self._row_to_domain(r) for r in rows)
 
     async def find_by_id(self, market_id: str) -> Market | None:
-        query = select(MarketModel).where(MarketModel.id == market_id)
+        query = select(markets).where(markets.c.id == market_id)
         result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        row = result.mappings().one_or_none()
+        return self._row_to_domain(row) if row else None
 
-    async def create(self, market_data: CreateMarketRequest) -> Market:
-        market = MarketModel(**market_data.model_dump())
-        self.session.add(market)
-        await self.session.commit()
-        await self.session.refresh(market)
-        return market
-
-    async def update(self, market_id: str, market_data: UpdateMarketRequest) -> Market:
+    async def create(self, market: Market) -> Market:
         query = (
-            update(MarketModel)
-            .where(MarketModel.id == market_id)
-            .values(**market_data.model_dump(exclude_unset=True))
-            .returning(MarketModel)
+            insert(markets)
+            .values(
+                id=market.id,
+                name=market.name,
+                description=market.description,
+                status=market.status,
+                created_at=market.created_at
+            )
+            .returning(markets)
         )
         result = await self.session.execute(query)
-        await self.session.commit()
-        return result.scalar_one()
+        row = result.mappings().one()
+        return self._row_to_domain(row)
 
-    async def delete(self, market_id: str) -> None:
-        query = delete(MarketModel).where(MarketModel.id == market_id)
-        await self.session.execute(query)
-        await self.session.commit()
-```
-
-## Dependency Injection
-
-```python
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
-
-# Database setup
-engine = create_async_engine("postgresql+asyncpg://user:pass@localhost/db")
-async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-# ✅ GOOD: Dependency injection
-async def get_db() -> AsyncSession:
-    async with async_session() as session:
-        yield session
-
-async def get_market_repository(
-    db: AsyncSession = Depends(get_db)
-) -> MarketRepository:
-    return SQLAlchemyMarketRepository(db)
-
-async def get_market_service(
-    repo: MarketRepository = Depends(get_market_repository)
-) -> MarketService:
-    return MarketService(repo)
-
-# Usage in routes
-@app.get("/api/markets")
-async def get_markets(
-    service: MarketService = Depends(get_market_service),
-    status: str | None = None
-):
-    markets = await service.find_all(status=status)
-    return {"success": True, "data": markets}
-
-# ✅ GOOD: Authentication dependency
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db)
-) -> User:
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str | None = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-
-    user = await user_repository.find_by_id(db, user_id)
-    if user is None:
-        raise credentials_exception
-    return user
-
-@app.get("/api/profile")
-async def get_profile(current_user: User = Depends(get_current_user)):
-    return {"success": True, "data": current_user}
-```
-
-## Service Layer Pattern
-
-```python
-from decimal import Decimal
-
-# ✅ GOOD: Service layer with business logic
-class MarketService:
-    def __init__(self, repository: MarketRepository):
-        self.repository = repository
-
-    async def find_all(
-        self,
-        status: str | None = None,
-        limit: int = 10,
-        offset: int = 0
-    ) -> tuple[Market, ...]:
-        """Find all markets with filters (returns immutable tuple)."""
-        filters = {"limit": limit, "offset": offset}
-        if status:
-            filters["status"] = status
-        return await self.repository.find_all(filters)
-
-    async def find_by_id(self, market_id: str) -> Market | None:
-        return await self.repository.find_by_id(market_id)
-
-    async def create(self, market_data: CreateMarketRequest) -> Market:
-        # Business logic: validate market doesn't already exist
-        existing = await self.repository.find_by_name(market_data.name)
-        if existing:
-            raise ValueError("Market with this name already exists")
-
-        # Create market with defaults
-        return await self.repository.create(market_data)
-
-    async def search_with_embeddings(
-        self,
-        query: str,
-        limit: int = 10
-    ) -> tuple[Market, ...]:
-        """Complex business logic with pure transformation."""
-        # I/O: Generate embedding
-        embedding = await self.embedding_service.generate(query)
-        results = await self.vector_search(embedding, limit)
-
-        # Pure: Extract IDs using comprehension
-        market_ids = tuple(r["id"] for r in results)
-        markets = await self.repository.find_by_ids(market_ids)
-
-        # Pure: Sort by similarity score
-        score_map = {r["id"]: r["score"] for r in results}
-        sorted_markets = sorted(
-            markets,
-            key=lambda m: score_map.get(m.id, Decimal("0")),
-            reverse=True
+    async def update(self, market: Market) -> Market:
+        """Update and return updated market using RETURNING. Uses market.id."""
+        query = (
+            update(markets)
+            .where(markets.c.id == market.id)
+            .values(name=market.name, description=market.description, status=market.status)
+            .returning(markets)
         )
-        return tuple(sorted_markets)  # Return immutable tuple
+        result = await self.session.execute(query)
+        row = result.mappings().one_or_none()
+        if not row:
+            raise NotFoundError(f"Market {market.id} not found")
+        return self._row_to_domain(row)
+
+    def _row_to_domain(self, row) -> Market:
+        return Market(
+            id=row["id"],
+            name=row["name"],
+            description=row["description"],
+            status=row["status"],
+            created_at=row["created_at"]
+        )
 ```
 
-## Error Handling Patterns
+---
+
+## ⚠️ Critical: AsyncSession Concurrency
+
+**NEVER use `asyncio.gather()` with same `AsyncSession`** - causes race conditions.
+
+### ✅ GOOD: Single query with explicit JOIN
 
 ```python
-from fastapi import HTTPException, Request
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
+# domain/models.py (add Position)
+from dataclasses import dataclass
 
-# ✅ GOOD: Custom exception classes
-class MarketNotFoundError(Exception):
-    def __init__(self, market_id: str):
-        self.market_id = market_id
-        super().__init__(f"Market {market_id} not found")
+@dataclass(frozen=True)
+class Position:
+    id: str
+    market_id: str
+    user_id: str
+    shares: int
 
-class InsufficientPermissionsError(Exception):
-    def __init__(self, action: str):
-        self.action = action
-        super().__init__(f"Insufficient permissions for {action}")
+# adapters/db/tables.py (add Position table)
+from sqlalchemy import MetaData, Table, Column, String, Integer
 
-# Global exception handlers
-@app.exception_handler(MarketNotFoundError)
-async def market_not_found_handler(request: Request, exc: MarketNotFoundError):
-    return JSONResponse(
-        status_code=404,
-        content={"success": False, "error": str(exc)}
-    )
-
-@app.exception_handler(InsufficientPermissionsError)
-async def permission_error_handler(request: Request, exc: InsufficientPermissionsError):
-    return JSONResponse(
-        status_code=403,
-        content={"success": False, "error": str(exc)}
-    )
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=400,
-        content={
-            "success": False,
-            "error": "Validation error",
-            "details": exc.errors()
-        }
-    )
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unexpected error", exc_info=exc)
-    return JSONResponse(
-        status_code=500,
-        content={"success": False, "error": "Internal server error"}
-    )
-```
-
-## Middleware Patterns
-
-```python
-from fastapi import Request
-from time import time
-import logging
-
-logger = logging.getLogger(__name__)
-
-# ✅ GOOD: Logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time()
-    response = await call_next(request)
-    duration = time() - start_time
-
-    logger.info(
-        "Request completed",
-        extra={
-            "method": request.method,
-            "path": request.url.path,
-            "status_code": response.status_code,
-            "duration_ms": duration * 1000,
-        }
-    )
-    return response
-
-# ✅ GOOD: CORS middleware
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://example.com"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+positions = Table(
+    "positions",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("market_id", String, nullable=False),
+    Column("user_id", String, nullable=False),
+    Column("shares", Integer, nullable=False),
 )
 
-# ✅ GOOD: Rate limiting middleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
+# adapters/db/market_repo.py
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from adapters.db.tables import markets, positions
+from domain.models import Market
 
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+async def get_markets_with_positions(
+    session: AsyncSession, user_id: str
+) -> tuple[Market, ...]:
+    """Get markets with user's positions using explicit JOIN."""
+    query = (
+        select(markets)
+        .join(positions, markets.c.id == positions.c.market_id)
+        .where(markets.c.status == "active")
+        .where(positions.c.user_id == user_id)
+        .distinct()
+    )
+    result = await session.execute(query)
+    rows = result.mappings().all()
+    return tuple(_row_to_market(r) for r in rows)
 
-@app.get("/api/markets")
-@limiter.limit("100/minute")
-async def get_markets(request: Request):
-    return {"success": True, "data": []}
+def _row_to_market(row) -> Market:
+    """Convert Row/Mapping to Market domain model."""
+    return Market(
+        id=row["id"],
+        name=row["name"],
+        description=row["description"],
+        status=row["status"],
+        created_at=row["created_at"]
+    )
 ```
 
-## Logging Patterns
-
-### Never Log Secrets or PII
-
-Must not log:
-- Passwords, API keys, tokens
-- Email addresses, names, phone numbers
-- Full request/response bodies
+### ✅ GOOD: Sequential queries with IN clause
 
 ```python
-import logging
+from dataclasses import dataclass
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from adapters.db.tables import markets, positions
+from domain.models import Market, Position
 
-logger = logging.getLogger(__name__)
+@dataclass(frozen=True)
+class MarketWithPositions:
+    """Aggregate result combining Market with user's Positions."""
+    market: Market
+    positions: tuple[Position, ...]
 
-# ❌ BAD: Logging PII or secrets
-logger.info(f"User: {user.email}")
-logger.debug(f"API key: {api_key}")
+async def get_user_markets_with_positions(
+    session: AsyncSession, user_id: str
+) -> tuple[MarketWithPositions, ...]:
+    """Fetch markets and positions sequentially, then merge in pure code.
 
-# ✅ GOOD: Log events without sensitive data
-logger.info("User logged in", extra={"user_id": user.id})
+    Returns type-safe aggregate with Market + Positions instead of dict.
+
+    NOTE: IN clause considerations:
+    - Deduplication: Use dict.fromkeys(market_ids) to preserve order
+    - Large lists: For very large lists (>1000 items), test performance and consider
+      alternatives like JOIN, CTE, or temp tables depending on your DB and use case
+    - Performance varies by database engine, query planner, and data distribution
+    """
+    # 1. Get market IDs where user has positions
+    pos_query = select(positions.c.market_id).where(positions.c.user_id == user_id)
+    pos_result = await session.execute(pos_query)
+    market_ids = [row["market_id"] for row in pos_result.mappings().all()]
+
+    if not market_ids:
+        return ()
+
+    # Deduplicate while preserving order
+    unique_market_ids = list(dict.fromkeys(market_ids))
+
+    # 2. Get markets by IDs (single query with IN)
+    market_query = select(markets).where(markets.c.id.in_(unique_market_ids))
+    market_result = await session.execute(market_query)
+    market_rows = market_result.mappings().all()
+
+    # 3. Get all positions for those markets
+    all_pos_query = (
+        select(positions)
+        .where(positions.c.market_id.in_(unique_market_ids))
+        .where(positions.c.user_id == user_id)
+    )
+    all_pos_result = await session.execute(all_pos_query)
+    pos_rows = all_pos_result.mappings().all()
+
+    # 4. Merge in pure Python (functional composition) with type-safe dataclass
+    markets_dict = {r["id"]: r for r in market_rows}
+    positions_by_market = {}
+    for p in pos_rows:
+        positions_by_market.setdefault(p["market_id"], []).append(p)
+
+    return tuple(
+        MarketWithPositions(
+            market=_row_to_market(markets_dict[mid]),
+            positions=tuple(_row_to_position(p) for p in positions_by_market.get(mid, []))
+        )
+        for mid in unique_market_ids if mid in markets_dict
+    )
+
+def _row_to_position(row) -> Position:
+    """Convert Row/Mapping to Position domain model."""
+    return Position(
+        id=row["id"],
+        market_id=row["market_id"],
+        user_id=row["user_id"],
+        shares=row["shares"]
+    )
 ```
 
-### Prefer Structured Logging and Lazy Formatting
-
-Use `extra` for structured data. Use lazy formatting (%) for performance.
+### ❌ BAD: Parallel with same session
 
 ```python
-from decimal import Decimal
+# ❌ NEVER DO THIS - Race condition!
+import asyncio
 
-# ✅ GOOD: Structured logging (preferred)
-logger.info(
-    "Order created",
-    extra={
-        "order_id": order.id,
-        "user_id": order.user_id,
-        "total": str(order.total),  # Decimal → string
-    },
+markets_result, positions_result = await asyncio.gather(
+    session.execute(markets_query),  # ❌ Same session
+    session.execute(positions_query)  # ❌ Same session - CORRUPTS STATE
 )
-
-# ✅ GOOD: Lazy formatting (recommended for simple cases)
-logger.info("Order %s created for user %s", order.id, order.user_id)
-
-# ⚠️ Acceptable but not preferred: f-strings (eagerly evaluated)
-logger.info(f"Order {order.id} created")
 ```
 
-### Use logger.exception() for Unexpected Errors
-
-```python
-try:
-    process_payment(order)
-except PaymentError:
-    logger.exception("Payment failed", extra={"order_id": order.id})
-    raise
-```
+---
 
 ## Security Best Practices
 
-### Never Build SQL with String Concatenation
-
-Use parameterized queries. Parameter style varies by driver.
-
-**SQLAlchemy (recommended for FastAPI)**:
-
 ```python
-from sqlalchemy import text
+# ✅ GOOD Option A: Parameterized queries with Table (recommended)
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from adapters.db.tables import users
 
-async def get_user(user_id: str, db: AsyncSession) -> User | None:
-    query = text("SELECT * FROM users WHERE id = :user_id")
-    result = await db.execute(query, {"user_id": user_id})
-    return result.fetchone()
-```
+async def get_user_via_table(user_id: str, session: AsyncSession) -> dict | None:
+    """Recommended: Use Table with parameterized where clause."""
+    query = select(users).where(users.c.id == user_id)
+    result = await session.execute(query)
+    row = result.mappings().one_or_none()
+    return dict(row) if row else None
 
-**asyncpg (PostgreSQL)**:
+# ✅ GOOD Option B: Raw SQL with text() and parameters
+from sqlalchemy import text
 
-```python
-import asyncpg
+async def get_user_via_text(user_id: str, session: AsyncSession) -> dict | None:
+    """Alternative: Raw SQL with bound parameters (still safe)."""
+    result = await session.execute(
+        text("SELECT * FROM users WHERE id = :user_id"),
+        {"user_id": user_id}
+    )
+    row = result.mappings().one_or_none()
+    return dict(row) if row else None
 
-async def get_user(user_id: str, conn: asyncpg.Connection) -> dict | None:
-    return await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
-```
+# ❌ BAD: SQL injection
+async def get_user_unsafe(user_id: str, session: AsyncSession):
+    query = f"SELECT * FROM users WHERE id = '{user_id}'"  # NEVER DO THIS
+    # Attacker can inject: user_id = "'; DROP TABLE users; --"
 
-**Never**:
-
-```python
-# ❌ BAD: SQL injection vulnerability
-query = f"SELECT * FROM users WHERE id = '{user_id}'"
-```
-
-### Never Use shell=True
-
-```python
+# ✅ GOOD: Safe subprocess
 import subprocess
 
-# ✅ GOOD: Safe subprocess execution
-subprocess.run(["ls", "-l", filename], capture_output=True, check=True)
+def list_files_safe(filename: str):
+    subprocess.run(["ls", "-l", filename], capture_output=True, check=True)
 
-# ❌ BAD: Command injection vulnerability
-subprocess.run(f"ls -l {filename}", shell=True)
+# ❌ BAD: Command injection
+def list_files_unsafe(filename: str):
+    subprocess.run(f"ls -l {filename}", shell=True)  # NEVER DO THIS
+    # Attacker can inject: filename = "file.txt; rm -rf /"
+
+# ✅ GOOD: Secrets from environment
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    database_url: str
+    api_key: str
+    model_config = {"env_file": ".env"}
 ```
 
-### Do Not Deserialize Untrusted Pickle
+---
+
+## Async HTTP Patterns
 
 ```python
-import json
-import pickle
-
-# ❌ BAD: Code execution vulnerability
-data = pickle.loads(untrusted_bytes)
-
-# ✅ GOOD: Use JSON for untrusted data
-data = json.loads(untrusted_string)
-```
-
-### Secrets from Environment
-
-```python
-import os
-
-# ✅ GOOD: Load secrets from environment
-API_KEY = os.environ["API_KEY"]
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-# ❌ BAD: Hardcoded secrets (exposed in git)
-API_KEY = "sk-1234..."
-```
-
-## Async Database Operations
-
-```python
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-import asyncio
-
-# ✅ GOOD: Async queries with parallel execution
-async def get_markets_with_positions(
-    db: AsyncSession,
-    user_id: str
-) -> tuple[Market, ...]:
-    """Fetch markets and positions in parallel (pure transformation)."""
-    # Parallel I/O
-    markets_query = select(MarketModel).where(MarketModel.status == "active")
-    positions_query = select(PositionModel).where(PositionModel.user_id == user_id)
-
-    markets_result, positions_result = await asyncio.gather(
-        db.execute(markets_query),
-        db.execute(positions_query)
-    )
-
-    markets = tuple(markets_result.scalars().all())
-    positions = tuple(positions_result.scalars().all())
-
-    # Pure: Combine results
-    position_map = {p.market_id: p for p in positions}
-
-    # Note: Mutating market objects here (side effect in infrastructure layer - OK)
-    for market in markets:
-        market.user_position = position_map.get(market.id)
-
-    return markets
-
-# ❌ BAD: N+1 query problem
-async def get_markets_with_positions_bad(db: AsyncSession, user_id: str):
-    markets = await db.execute(select(MarketModel))
-    for market in markets.scalars():
-        # Separate query for each market - slow!
-        position = await db.execute(
-            select(PositionModel).where(
-                PositionModel.market_id == market.id,
-                PositionModel.user_id == user_id
-            )
-        )
-        market.user_position = position.scalar_one_or_none()
-    return markets
-```
-
-## Caching with Redis
-
-```python
-from redis.asyncio import Redis
-import json
-
-# ✅ GOOD: Redis caching layer
-class CacheService:
-    def __init__(self, redis: Redis):
-        self.redis = redis
-
-    async def get(self, key: str) -> dict | None:
-        data = await self.redis.get(key)
-        if data:
-            return json.loads(data)
-        return None
-
-    async def set(self, key: str, value: dict, ttl: int = 300):
-        await self.redis.setex(key, ttl, json.dumps(value))
-
-    async def delete(self, key: str):
-        await self.redis.delete(key)
-
-# Cached repository (decorator pattern)
-class CachedMarketRepository:
-    def __init__(self, base_repo: MarketRepository, cache: CacheService):
-        self.base_repo = base_repo
-        self.cache = cache
-
-    async def find_by_id(self, market_id: str) -> Market | None:
-        cache_key = f"market:{market_id}"
-
-        # Check cache
-        cached = await self.cache.get(cache_key)
-        if cached:
-            return Market(**cached)
-
-        # Cache miss - fetch from database
-        market = await self.base_repo.find_by_id(market_id)
-        if market:
-            await self.cache.set(cache_key, market.model_dump(), ttl=300)
-
-        return market
-
-    async def update(self, market_id: str, market_data: UpdateMarketRequest) -> Market:
-        # Update database
-        market = await self.base_repo.update(market_id, market_data)
-
-        # Invalidate cache
-        await self.cache.delete(f"market:{market_id}")
-
-        return market
-```
-
-## Background Tasks
-
-```python
-from fastapi import BackgroundTasks
-
-# ✅ GOOD: Background task for async operations
-async def send_email_notification(user_email: str, message: str):
-    """Send email notification (runs in background)."""
-    await email_service.send(user_email, message)
-
-@app.post("/api/markets")
-async def create_market(
-    market: CreateMarketRequest,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user)
-):
-    created = await market_service.create(market)
-
-    # Queue background task
-    background_tasks.add_task(
-        send_email_notification,
-        current_user.email,
-        f"Market '{created.name}' created successfully"
-    )
-
-    return {"success": True, "data": created}
-
-# ✅ GOOD: Worker queue for heavy tasks
-from celery import Celery
-
-celery_app = Celery("worker", broker="redis://localhost:6379")
-
-@celery_app.task
-def index_market_embeddings(market_id: str):
-    """Generate and index market embeddings (CPU intensive)."""
-    market = market_repository.find_by_id(market_id)
-    embeddings = embedding_service.generate(market.description)
-    vector_store.index(market_id, embeddings)
-
-@app.post("/api/markets/{market_id}/index")
-async def index_market(market_id: str):
-    # Offload to Celery worker
-    index_market_embeddings.delay(market_id)
-    return {"success": True, "message": "Indexing queued"}
-```
-
-## Async HTTP Client Patterns
-
-### Do Not Mix Sync and Async I/O
-
-```python
+# ✅ GOOD: All async with timeout
 import httpx
+import asyncio
 from pydantic import BaseModel
 
 class UserPayload(BaseModel):
     id: str
     name: str
-    email: str
 
-# ✅ GOOD: All async
 async def fetch_users(base_url: str) -> tuple[UserPayload, ...]:
-    async with httpx.AsyncClient(base_url=base_url) as client:
-        response = await client.get("/users")
-        users = [UserPayload(**u) for u in response.json()]
-        return tuple(users)  # Return immutable tuple
-
-# ❌ BAD: Mixing sync and async - blocks event loop
-import requests
-
-async def fetch_users_bad(base_url: str) -> list[UserPayload]:
-    response = requests.get(f"{base_url}/users")  # Blocks event loop!
-    return [UserPayload(**u) for u in response.json()]
-```
-
-### Avoid Blocking Calls Inside Async Functions
-
-```python
-# ✅ GOOD: Use async file I/O library
-import aiofiles
-
-async def process_file(path: str) -> str:
-    async with aiofiles.open(path, encoding="utf-8") as f:
-        return await f.read()
-
-# ❌ BAD: Synchronous I/O blocks event loop
-async def process_file_bad(path: str) -> str:
-    with open(path) as f:  # Synchronous I/O blocks
-        return f.read()
-```
-
-### Always Use Explicit Timeouts
-
-MUST set timeouts on all outbound HTTP requests to prevent indefinite hangs.
-
-```python
-import httpx
-
-# ✅ GOOD: Explicit timeouts
-async def fetch_external_data(url: str) -> dict:
     timeout = httpx.Timeout(10.0, connect=5.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.get(url)
+    async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
+        response = await client.get("/users")
         response.raise_for_status()
-        return response.json()
+        return tuple(UserPayload(**u) for u in response.json())
 
-# ❌ BAD: No timeout (can hang forever)
-async def fetch_external_data_bad(url: str) -> dict:
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url)
-        return response.json()
-```
-
-### Parallel HTTP Requests
-
-```python
-import asyncio
-import httpx
-
-# ✅ GOOD: Parallel requests with asyncio.gather
-async def fetch_multiple_resources(user_id: str) -> dict:
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-        user_task = client.get(f"/api/users/{user_id}")
-        orders_task = client.get(f"/api/orders?user_id={user_id}")
-        preferences_task = client.get(f"/api/preferences/{user_id}")
-
-        user_res, orders_res, prefs_res = await asyncio.gather(
-            user_task, orders_task, preferences_task
+# ✅ GOOD: Parallel requests (OK - different HTTP clients, NOT same AsyncSession)
+async def fetch_multiple(user_id: str, base_url: str) -> dict:
+    async with httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(10.0)) as client:
+        user_res, orders_res = await asyncio.gather(
+            client.get(f"/api/users/{user_id}"),
+            client.get(f"/api/orders?user_id={user_id}")
         )
-
-        return {
-            "user": user_res.json(),
-            "orders": orders_res.json(),
-            "preferences": prefs_res.json()
-        }
-
-# ❌ BAD: Sequential requests
-async def fetch_multiple_resources_bad(user_id: str) -> dict:
-    async with httpx.AsyncClient() as client:
-        user = await client.get(f"/api/users/{user_id}")
-        orders = await client.get(f"/api/orders?user_id={user_id}")
-        prefs = await client.get(f"/api/preferences/{user_id}")
-
-        return {
-            "user": user.json(),
-            "orders": orders.json(),
-            "preferences": prefs.json()
-        }
-```
-
-## Input Validation & Security
-
-### Validate All External Input with Pydantic
-
-MUST validate:
-- All user input from request bodies, query params, path params
-- User-provided file paths (prevent directory traversal)
-- User-provided filenames (prevent command injection)
-- All data from external APIs
-
-```python
-from pydantic import BaseModel, EmailStr, field_validator, Field
-
-# ✅ GOOD: Strict validation with Pydantic
-class CreateUserRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    email: EmailStr
-    age: int = Field(..., ge=0, le=150)
-    tags: list[str] = Field(default_factory=list, max_length=10)
-
-    model_config = {"frozen": True}
-
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Name cannot be empty or whitespace")
-        return v.strip()
-
-    @field_validator("age")
-    @classmethod
-    def validate_age(cls, v: int) -> int:
-        if v < 0 or v > 150:
-            raise ValueError("Age must be between 0 and 150")
-        return v
-
-@app.post("/api/users")
-async def create_user(request: CreateUserRequest):
-    # Input already validated by Pydantic
-    user = await user_service.create(request)
-    return {"success": True, "data": user}
-```
-
-### Validate and Sanitize File Paths
-
-MUST validate user-provided file paths to prevent directory traversal attacks.
-
-```python
-from pathlib import Path
-from fastapi import HTTPException
-
-# ✅ GOOD: Path validation
-def read_user_file(filename: str, allowed_dir: str) -> str:
-    # Resolve to absolute path and check it's within allowed directory
-    file_path = Path(allowed_dir) / filename
-    file_path = file_path.resolve()
-    allowed_path = Path(allowed_dir).resolve()
-
-    if not file_path.is_relative_to(allowed_path):
-        raise HTTPException(
-            status_code=400,
-            detail="Path traversal detected"
-        )
-
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    with open(file_path, encoding="utf-8") as f:
-        return f.read()
-
-@app.get("/api/files/{filename}")
-async def get_file(filename: str):
-    allowed_directory = "/var/app/uploads"
-    content = read_user_file(filename, allowed_directory)
-    return {"success": True, "content": content}
-
-# ❌ BAD: No validation - directory traversal vulnerability
-@app.get("/api/files/{filename}")
-async def get_file_bad(filename: str):
-    # User could pass "../../../etc/passwd"
-    with open(f"/var/app/uploads/{filename}") as f:
-        return {"content": f.read()}
-```
-
-### Sanitize Filenames
-
-```python
-import re
-from fastapi import HTTPException
-
-# ✅ GOOD: Filename sanitization
-def sanitize_filename(filename: str) -> str:
-    # Remove any path separators
-    filename = filename.replace("/", "").replace("\\", "")
-
-    # Allow only alphanumeric, dots, dashes, underscores
-    if not re.match(r'^[\w\-. ]+$', filename):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid filename characters"
-        )
-
-    # Prevent hidden files
-    if filename.startswith("."):
-        raise HTTPException(
-            status_code=400,
-            detail="Hidden files not allowed"
-        )
-
-    return filename
-
-@app.post("/api/upload")
-async def upload_file(filename: str, content: bytes):
-    safe_filename = sanitize_filename(filename)
-    # Proceed with safe filename
-    pass
-```
-
-## Testing Patterns
-
-```python
-import pytest
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
-from collections.abc import AsyncGenerator
-
-# ✅ GOOD: Async test fixtures
-@pytest.fixture
-async def async_client() -> AsyncGenerator[AsyncClient, None]:
-    async with AsyncClient(app=app, base_url="http://test") as client:
-        yield client
-
-@pytest.fixture
-async def test_db() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("postgresql+asyncpg://test:test@localhost/test_db")
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    async with async_session() as session:
-        yield session
-
-    await engine.dispose()
-
-# ✅ GOOD: Integration tests
-@pytest.mark.asyncio
-async def test_create_market(async_client: AsyncClient, test_db: AsyncSession):
-    market_data = {
-        "name": "Test Market",
-        "description": "Test description",
-        "end_date": "2024-12-31T23:59:59Z",
-        "categories": ["test"]
-    }
-
-    response = await async_client.post("/api/markets", json=market_data)
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    assert data["data"]["name"] == "Test Market"
-
-# ✅ GOOD: Mock dependencies
-from unittest.mock import Mock
-
-@pytest.mark.asyncio
-async def test_get_market_not_found(async_client: AsyncClient):
-    async def mock_get_market_service():
-        mock_repo = Mock(spec=MarketRepository)
-        mock_repo.find_by_id.return_value = None
-        return MarketService(mock_repo)
-
-    app.dependency_overrides[get_market_service] = mock_get_market_service
-
-    response = await async_client.get("/api/markets/nonexistent")
-
-    assert response.status_code == 404
-    assert response.json()["success"] is False
+        return {"user": user_res.json(), "orders": orders_res.json()}
 ```
 
 ---
 
-**Key Principles**:
+## Testing Patterns
 
-1. **Domain purity**: Use `@dataclass(frozen=True)` + `tuple` for domain models
-2. **DTOs**: Use Pydantic `BaseModel` + `list` for API validation
-3. **Immutable returns**: Return `tuple` from repositories and services
-4. **Pure transformations**: Use comprehensions, avoid for loops with `.append()`
-5. **Decimal for money**: Always `Decimal` in domain, convert at boundaries
-6. **Protocol for DI**: Use `Protocol` for repository interfaces
-7. **Async all the way**: No sync I/O in async functions
-8. **Type safety**: Python 3.11+ union syntax (`|`), no `typing.List`/`Optional`
+### Domain Tests (Pure - No Mocks)
 
-**Remember**: FastAPI combines Python's type system with async/await for high-performance APIs. Follow coding-standards-python.md for functional programming principles while leveraging Pydantic for validation at boundaries.
+```python
+# tests/domain/test_user_rules.py
+from domain.models import NewUser
+from domain.services.user_rules import validate_new_user
+
+def test_validate_new_user_success():
+    new_user = NewUser(
+        name="Alice",
+        email="alice@example.com",
+        age=25,
+        tags=("premium",)
+    )
+    assert validate_new_user(new_user) == ()
+
+def test_validate_new_user_invalid():
+    new_user = NewUser(
+        name="",
+        email="invalid",
+        age=200,
+        tags=()
+    )
+    errors = validate_new_user(new_user)
+    assert "Name cannot be empty" in errors
+    assert "Invalid email" in errors
+```
+
+### Use Case Tests (With Test Doubles)
+
+```python
+# tests/usecases/test_create_user.py
+import pytest
+from datetime import datetime, timezone
+from domain.models import NewUser, User
+from usecases.user.create_user import CreateUserUseCase
+from shared.clock import FixedClock
+from shared.idgen import SequentialIdGen
+
+class MockUserRepository:
+    def __init__(self):
+        self.users = {}
+    async def find_by_email(self, email: str) -> User | None:
+        return next((u for u in self.users.values() if u.email == email), None)
+    async def create(self, user: User) -> User:
+        self.users[user.id] = user
+        return user
+
+class MockUnitOfWork:
+    def __init__(self):
+        self.committed = False
+    async def __aenter__(self):
+        return self
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self.committed = True
+
+@pytest.mark.asyncio
+async def test_create_user_success():
+    repo = MockUserRepository()
+    uow = MockUnitOfWork()
+    clock = FixedClock(datetime(2024, 1, 1, tzinfo=timezone.utc))
+    id_gen = SequentialIdGen()
+    use_case = CreateUserUseCase(repo, uow, clock, id_gen)
+
+    # NewUser: before persistence (no id/created_at yet)
+    new_user = NewUser(
+        name="Alice",
+        email="alice@example.com",
+        age=25,
+        tags=("premium",)
+    )
+    created = await use_case.execute(new_user)
+
+    assert created.id == "user-1"
+    assert created.email == "alice@example.com"
+    assert created.created_at == datetime(2024, 1, 1, tzinfo=timezone.utc)
+    assert uow.committed is True
+```
+
+### Integration Tests
+
+```python
+# tests/api/test_users_integration.py
+import pytest
+from httpx import AsyncClient, ASGITransport
+from main import app
+
+@pytest.fixture
+async def async_client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+@pytest.mark.asyncio
+async def test_create_user_integration(async_client: AsyncClient):
+    response = await async_client.post("/api/users", json={
+        "name": "Alice",
+        "email": "alice@example.com",
+        "age": 25,
+        "tags": ["premium"]
+    })
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "Alice"
+    assert data["age"] == 25
+```
+
+---
+
+## Database Session Setup (SQLAlchemy Core)
+
+```python
+# adapters/db/session.py
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from shared.settings import settings
+
+# Create async engine
+engine = create_async_engine(
+    settings.database_url,
+    echo=settings.debug,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20
+)
+
+# Create session factory
+async_session_maker = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False
+)
+```
+
+---
+
+## Alembic Migrations (Core)
+
+```python
+# adapters/db/migrations/env.py
+from alembic import context
+from sqlalchemy import pool
+from sqlalchemy.ext.asyncio import async_engine_from_config
+from adapters.db.tables import metadata  # Import metadata, not Base
+
+# Set target metadata for autogenerate
+target_metadata = metadata
+
+# ... rest of Alembic config
+```
+
+---
+
+## Recommended Libraries
+
+**API**: FastAPI, pydantic v2, pydantic-settings
+**DB**: SQLAlchemy 2.0 Core (NO ORM), alembic, asyncpg
+**DI/Ports**: typing.Protocol, (optional) dependency-injector
+**Utils**: returns, structlog, httpx, tenacity, orjson
+**Jobs**: Celery+Redis, ARQ, Dramatiq, AWS SQS
+**Test**: pytest, pytest-asyncio, httpx (ASGITransport), faker
+
+---
+
+## Shared Utilities Implementation
+
+```python
+# shared/clock.py
+from datetime import datetime, timezone
+from usecases.shared.ports import Clock
+
+class SystemClock:
+    """Production clock - returns current UTC time."""
+    def now(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+class FixedClock:
+    """Test clock - returns fixed time for deterministic tests."""
+    def __init__(self, fixed_time: datetime):
+        if fixed_time.tzinfo is None:
+            raise ValueError("Must be timezone-aware")
+        self._time = fixed_time
+
+    def now(self) -> datetime:
+        return self._time
+
+# shared/idgen.py
+import uuid
+from usecases.shared.ports import IdGenerator
+
+class UUIDGenerator:
+    """Production ID generator - generates UUID v4."""
+    def generate(self) -> str:
+        return str(uuid.uuid4())
+
+class SequentialIdGen:
+    """Test ID generator - generates sequential IDs for deterministic tests."""
+    def __init__(self, prefix: str = "user"):
+        self.prefix = prefix
+        self.counter = 0
+
+    def generate(self) -> str:
+        self.counter += 1
+        return f"{self.prefix}-{self.counter}"
+```
+
+---
+
+## Key Principles (13 Critical Rules)
+
+1. **Domain purity**: `@dataclass(frozen=True)` + `tuple`
+2. **3-layer separation**: Domain ≠ DB Tables ≠ API DTOs
+3. **Immutable returns**: Return `tuple` from repos/use cases
+4. **Decimal for money**: Always `Decimal` in domain
+5. **Protocol for ports**: Dependency inversion
+6. **Async only**: No sync I/O in async functions
+7. **Type safety**: Python 3.11+ `|` syntax, strict pyright
+8. **Unidirectional deps**: Outer→inner (via ports)
+9. **Test w/o mocks**: Domain testable without mocking
+10. **UoW for TX**: Use case controls transaction boundaries
+11. **Timezone-aware**: Always UTC, `datetime.now(timezone.utc)`
+12. **NO AsyncSession∥**: Never same session for parallel queries
+13. **Explicit SQL→Domain**: Use Core, no ORM stateful entities
+
+---
+
+## ⚠️ Critical Warnings
+
+**SQLAlchemy Core**: Use `Table` + `MetaData`, NOT ORM (`DeclarativeBase`, `relationship()`). Explicit Row → Domain conversion.
+
+**AsyncSession**: NEVER `asyncio.gather()` with same session. Use JOIN or sequential queries with IN clause.
+
+**Timezone**: ALWAYS timezone-aware datetime. Use `datetime.now(timezone.utc)`.
+
+**UoW**: Transaction boundary at use case. Repos execute queries, UoW commits.
+
+**Repository Pattern**: Repository holds `self.session: AsyncSession`. All methods use `self.session.execute()`.
+
+**RETURNING Clause**: Supported in PostgreSQL (all versions), MySQL 8.0.1+, SQLite 3.35+. For older databases or drivers, use INSERT then SELECT.
+
+**DI Session Sharing**: FastAPI caches dependency results per request by default. All dependencies using `Depends(get_db)` receive the SAME AsyncSession instance within a request. Use `use_cache=False` to disable caching if needed.
+
+**IN Clause**: Use `list(dict.fromkeys(ids))` for order-preserving deduplication. For large lists, test performance and consider JOIN, CTE, or temp tables as alternatives.
+
+**DTO frozen**: `model_config = {"frozen": True}` prevents attribute reassignment but NOT mutation of list/dict fields.
+
+**Domain Type Safety**: Use separate types for pre/post-persistence (e.g., `NewUser` without id/created_at, `User` with non-null id/created_at). UseCase converts NewUser → User with Clock/IdGenerator before calling Repository.
+
+---
+
+**Remember**: This mirrors Clojure's philosophy—data-centric, pure core, orchestration in use cases, side effects at adapter boundaries. SQLAlchemy Core provides explicit SQL control while maintaining safety and portability. Follow [coding-standards-python.md](coding-standards-python.md) for functional programming principles.
