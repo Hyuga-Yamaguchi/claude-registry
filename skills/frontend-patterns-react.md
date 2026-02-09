@@ -17,7 +17,7 @@ For language-level TypeScript standards, see [coding-standards-typescript.md](co
 
 **What bulletproof-react provides:**
 - Features-based organization (domain boundaries)
-- Unidirectional codebase (shared → domains → features → app)
+- Unidirectional codebase (top-level shared directories → features → app)
 - State classification (Component / Application / Server Cache / Form / URL)
 
 **What we add (Re-frame layer):**
@@ -59,7 +59,7 @@ src/
 │   ├── Provider.tsx            # Global providers (QueryClient, Theme, etc)
 │   ├── Router.tsx              # Router configuration (all route definitions here, lazy imports only)
 │   ├── events/                 # Cross-feature orchestration (strict scope, see rules below)
-│   │   ├── types.ts            # App-internal Event/Handler input/output types only (references Command from shared/types/commands.ts, doesn't define it)
+│   │   ├── types.ts            # App-internal Event/Handler input/output types only (references Command from types/commands.ts)
 │   │   └── handlers/
 │   ├── effects/                # Cross-feature side effects (strict scope, see rules below)
 │   │   ├── analytics.effects.ts
@@ -67,66 +67,84 @@ src/
 │   └── store/                  # Global application state (jotai atoms)
 │       └── ui.atoms.ts
 │
-├── domains/                    # Cross-cutting domains (importable by features, ESLint allowed)
-│   └── auth/
-│       ├── pages/              # Route entry points
-│       │   └── LoginPage.tsx
-│       ├── components/         # Reusable components
-│       │   └── ProtectedRoute.tsx
-│       ├── data/
-│       │   ├── api.ts
-│       │   ├── keys.ts
-│       │   ├── queries.ts
-│       │   └── mutations.ts
-│       ├── model/
-│       │   ├── types.ts
-│       │   └── schemas.ts
-│       └── index.ts            # Public exports (recommended for domains)
+├── api/                        # All API requests (outside features, shared across app)
+│   ├── auth/                   # Auth API
+│   │   └── auth.api.ts         # All-in-one: api client, keys, queries, mutations (small resources)
+│   ├── users/                  # Users API
+│   │   ├── api.ts              # API client (large resources: split when file > 200 lines)
+│   │   ├── keys.ts
+│   │   ├── queries.ts
+│   │   └── mutations.ts
+│   ├── accounts/               # Accounts API
+│   │   └── accounts.api.ts
+│   └── departments/            # Departments API
+│       └── departments.api.ts
 │
-├── shared/                     # Shared across all features
-│   ├── components/             # Shared components
-│   │   ├── Button.tsx          # Primitives
+├── assets/                     # Static files (images, fonts, etc.)
+│
+├── components/                 # Shared components across entire application
+│   ├── auth/                   # Auth-specific components
+│   │   ├── ProtectedRoute.tsx
+│   │   └── LoginForm.tsx
+│   ├── ui/                     # UI primitives
+│   │   ├── Button.tsx
 │   │   ├── Card.tsx
-│   │   ├── Spinner.tsx         # Feedback components
-│   │   ├── ErrorView.tsx
-│   │   └── index.ts            # Barrel exports for convenience
-│   ├── lib/                    # Shared utilities & configurations
-│   │   ├── query-client.ts     # TanStack Query setup
-│   │   ├── http.ts             # httpJson, httpText
-│   │   ├── errors.ts           # ApiError class
-│   │   └── hooks/              # Shared hooks
-│   │       ├── use-toggle.ts
-│   │       └── use-debounce.ts
-│   └── types/                  # Truly shared types only (see guidelines below)
-│       ├── common.ts           # Pagination, ApiResponse<T>, etc
-│       └── commands.ts         # Command pattern types (used by features/domains)
+│   │   ├── Spinner.tsx
+│   │   └── ErrorView.tsx
+│   └── index.ts                # Barrel exports for convenience
 │
-└── features/                   # Feature modules (strictly isolated, no cross-import)
-    ├── settings/               # Isolated feature
-    │   ├── pages/              # Route entry points
-    │   │   ├── SettingsPage.tsx
-    │   │   ├── AccountsPage.tsx
-    │   │   └── DepartmentsPage.tsx
-    │   ├── components/         # Components (not pages)
-    │   │   ├── AccountList.tsx
-    │   │   ├── AccountCard.tsx
-    │   │   └── DepartmentForm.tsx
-    │   ├── data/               # Split by resource for proper granularity
-    │   │   ├── accounts/
-    │   │   │   ├── api.ts
-    │   │   │   ├── keys.ts
-    │   │   │   ├── queries.ts
-    │   │   │   └── mutations.ts
-    │   │   └── departments/
-    │   │       ├── api.ts
-    │   │       ├── keys.ts
-    │   │       ├── queries.ts
-    │   │       └── mutations.ts
-    │   ├── model/
-    │   │   └── types.ts
-    │
-    └── dashboard/
-        └── ...
+├── config/                     # Global configurations, exported env variables, etc.
+│   └── env.ts
+│
+├── features/                   # Feature modules (strictly isolated, no cross-import)
+│   ├── settings/               # Isolated feature
+│   │   ├── pages/              # Route entry points
+│   │   │   ├── SettingsPage.tsx
+│   │   │   ├── AccountsPage.tsx
+│   │   │   └── DepartmentsPage.tsx
+│   │   ├── components/         # Feature-scoped components (not pages)
+│   │   │   ├── AccountList.tsx
+│   │   │   ├── AccountCard.tsx
+│   │   │   └── DepartmentForm.tsx
+│   │   ├── hooks/              # Feature-scoped hooks
+│   │   │   └── use-account-filter.ts
+│   │   ├── stores/             # Feature-scoped state stores
+│   │   │   └── settings.atoms.ts
+│   │   ├── types/              # Feature-local types only
+│   │   │   ├── accounts.ts
+│   │   │   └── departments.ts
+│   │   └── utils/              # Feature-scoped utility functions
+│   │       └── format-department.ts
+│   │
+│   └── dashboard/
+│       └── ...
+│
+├── hooks/                      # Shared hooks used across entire application
+│   ├── use-toggle.ts
+│   └── use-debounce.ts
+│
+├── lib/                        # Reusable libraries preconfigured for the application
+│   ├── query-client.ts         # TanStack Query setup
+│   ├── http.ts                 # httpJson, httpText
+│   └── errors.ts               # ApiError class
+│
+├── stores/                     # Global state stores
+│   └── theme.atoms.ts
+│
+├── testing/                    # Test utilities and mocks
+│   ├── test-utils.tsx
+│   └── mocks/
+│       └── handlers.ts
+│
+├── types/                      # Shared types used across the application
+│   ├── common.ts               # Pagination, ApiResponse<T>, etc.
+│   ├── commands.ts             # Command pattern types
+│   ├── auth.ts                 # Auth-related types (User, AuthState, etc.)
+│   └── users.ts                # User entity types (shared across features)
+│
+└── utils/                      # Shared utility functions
+    ├── format-date.ts
+    └── validate.ts
 ```
 
 ### App Layer (Simple & Clean)
@@ -150,7 +168,7 @@ export default App
 ```typescript
 // app/Provider.tsx (EXAMPLE)
 import { QueryClientProvider } from '@tanstack/react-query'
-import { queryClient } from '@/shared/lib/query-client'
+import { queryClient } from '@/lib/query-client'
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
@@ -169,9 +187,7 @@ import { lazy, Suspense } from 'react'
 // Features
 const SettingsPage = lazy(() => import('@/features/settings/pages/SettingsPage'))
 const DashboardPage = lazy(() => import('@/features/dashboard/pages/DashboardPage'))
-
-// Domains (Auth)
-const LoginPage = lazy(() => import('@/domains/auth/pages/LoginPage'))
+const LoginPage = lazy(() => import('@/features/auth/pages/LoginPage'))
 
 export function AppRouter() {
   return (
@@ -190,45 +206,75 @@ export function AppRouter() {
 
 ### Placement Rules
 
-**domains/[domain]/** (Cross-cutting domains only):
-- For domains that multiple features depend on (auth, pricing, billing)
-- Importable by features (ESLint exception configured)
-- Same structure as features: `pages/`, `components/`, `data/`, `model/`, `index.ts`
-- `index.ts`: **Recommended** - export public API for features to import (e.g., `export { useUser } from './data/queries'`)
+**api/** (All API requests - outside features):
+- **All API calls live here** - never in `features/*/api/`
+- **Small resources (<200 lines)**: All-in-one file recommended
+  - `auth/auth.api.ts`: API client + keys + queries + mutations in single file
+  - `accounts/accounts.api.ts`: Single file for accounts API
+  - **Benefits**: Fewer files, easier navigation, clear ownership
+- **Large resources (>200 lines)**: Split into separate files
+  - `users/api.ts`, `users/keys.ts`, `users/queries.ts`, `users/mutations.ts`
+  - **Benefits**: Better organization, easier code review, clearer responsibilities
+- **Rationale**: Centralizes all API logic, prevents duplication, easier to maintain API contracts
 
-**features/[domain]/** (Isolated features):
+**features/[feature]/** (Isolated features):
 - `pages/`: Route entry points (page components that compose UI)
   - Examples: `SettingsPage.tsx`, `AccountsPage.tsx`, `DepartmentsPage.tsx`
   - These are lazy-loaded from `app/Router.tsx`
   - **Keep pages thin**: Primarily component composition, routing logic (useParams, useNavigate), and page layout
   - **Avoid**: Business logic, complex state management, data transformations (delegate to components or hooks)
-- `components/`: Reusable components (NOT pages)
+- `components/`: Feature-scoped components (NOT pages)
   - Examples: `AccountList.tsx`, `AccountCard.tsx`, `DepartmentForm.tsx`
   - Pure presenters or containers without routing logic
   - Organize by subdirectory when >5 components (e.g., `accounts/`, `departments/`)
-- `data/`: Server cache layer (TanStack Query), split by resource for proper granularity
-  - Structure: `data/<resource>/api.ts`, `data/<resource>/keys.ts`, `data/<resource>/queries.ts`, `data/<resource>/mutations.ts`
-  - Examples: `data/accounts/`, `data/departments/` (API resources, not feature names)
-  - Each resource subdirectory contains its own API client, query keys, queries, and mutations
-  - **Rationale**: Resource-based organization provides consistent structure regardless of project size, improves file discoverability, and prevents individual files from becoming too large
-- `model/`: Feature-local types, schemas, selectors
-  - `types.ts`: Domain types specific to this feature
-  - `schemas.ts`: Zod schemas for validation
-- `index.ts`: ❌ **Prohibited** - features don't cross-import, so barrel exports serve no purpose and create boundary confusion. If sharing is needed: promote to `domains/` (for cross-cutting concerns) or move to `shared/` (for pure UI/types/utils)
+- `hooks/`: Feature-scoped custom hooks
+  - Examples: `use-account-filter.ts`, `use-department-sort.ts`
+  - Only used within this feature
+- `stores/`: Feature-scoped state stores (jotai atoms, zustand stores)
+  - Examples: `settings.atoms.ts`
+  - Only used within this feature
+- `types/`: **Feature-local types ONLY**
+  - `accounts.ts`, `departments.ts`: Types specific to this feature
+  - ❌ **Prohibited**: Types used by other features (move to `types/`)
+  - **Rationale**: Prevents cross-feature dependencies, keeps features isolated
+- `utils/`: Feature-scoped utility functions
+  - Examples: `format-department.ts`, `validate-account.ts`
+  - Only used within this feature
+- `index.ts`: ❌ **Prohibited** - features don't cross-import, so barrel exports serve no purpose and create boundary confusion. If sharing is needed: move to top-level directories
 
-**shared/**:
-- `components/`: Shared components (Button, Card, Spinner, ErrorView)
-  - `index.ts`: Barrel exports for convenience (`export { Button } from './Button'`, etc.)
-  - Import as: `import { Spinner, ErrorView } from '@/shared/components'`
-- `lib/`: Shared utilities (http, query-client, errors, hooks)
-  - `http.ts`, `query-client.ts`, `errors.ts`
-  - `hooks/`: Shared custom hooks (`use-toggle.ts`, `use-debounce.ts`)
-- `types/`: **Truly shared types ONLY**
+**Top-level directories** (Shared across entire application):
+- `components/`: Shared components used across features
+  - `auth/`: Auth-specific components (`ProtectedRoute.tsx`, `LoginForm.tsx`)
+  - `ui/`: UI primitives (`Button.tsx`, `Card.tsx`, `Spinner.tsx`, `ErrorView.tsx`)
+  - `index.ts`: Barrel exports for convenience (`export { Button } from './ui/Button'`)
+  - Import as: `import { Spinner, ErrorView } from '@/components'`
+- `hooks/`: Shared custom hooks
+  - Examples: `use-toggle.ts`, `use-debounce.ts`
+  - Used across multiple features
+- `lib/`: Reusable libraries preconfigured for the application
+  - `http.ts`: HTTP client utilities
+  - `query-client.ts`: TanStack Query setup
+  - `errors.ts`: Error classes
+- `stores/`: Global state stores
+  - Examples: `theme.atoms.ts`, `user.atoms.ts`
+  - Application-wide state
+- `types/`: **Shared types used across the application**
   - `common.ts`: `Pagination`, `ApiResponse<T>`, `SortOrder`, utility types
-  - `commands.ts`: Command pattern types (`Command`, used by features/domains to avoid app layer dependency)
-  - ✅ Allowed: Types used across multiple features/domains
-  - ❌ Prohibited: Feature-specific types, API contract types (keep near data/api)
-  - **Prevent "type graveyard"**: If a type is used by only one feature, keep it in that feature's `model/types.ts`
+  - `commands.ts`: Command pattern types (`Command`)
+  - `auth.ts`: Auth-related types (`User`, `AuthState`, etc.)
+  - `users.ts`: User entity types (shared across features)
+  - ✅ Allowed: Types used across multiple features
+  - ❌ Prohibited: Feature-specific types (keep in `features/[feature]/types/`)
+  - **Prevent "type graveyard"**: If a type is used by only one feature, keep it in that feature's `types/` folder
+- `utils/`: Shared utility functions
+  - Examples: `format-date.ts`, `validate.ts`
+  - Used across multiple features
+- `config/`: Global configurations
+  - Examples: `env.ts`, `constants.ts`
+- `assets/`: Static files
+  - Images, fonts, etc.
+- `testing/`: Test utilities and mocks
+  - Examples: `test-utils.tsx`, `mocks/handlers.ts`
 
 **Page vs Component Decision**:
 - **pages/**: Route entry points with routing context
@@ -243,17 +289,23 @@ export function AppRouter() {
   - Focused on UI logic, data display, and user interactions
 
 **Cross-feature Import Rules** (Enforced via ESLint):
-- ✅ Allowed: `features → domains` (e.g., `import { useUser } from '@/domains/auth'`)
-- ✅ Allowed: `features → shared`, `domains → shared` (e.g., `import type { Command } from '@/shared/types/commands'`)
-- ❌ Prohibited: `features → features` (strict isolation)
-- ❌ Prohibited: `features → app`, `domains → app` (unidirectional codebase)
-- ❌ Prohibited: `shared → features`, `shared → domains` (unidirectional)
+- ✅ Allowed: `features → api` (e.g., `import { useUser } from '@/api/auth/auth.api'`)
+- ✅ Allowed: `features → types` (e.g., `import type { Command } from '@/types/commands'`)
+- ✅ Allowed: `features → components` (e.g., `import { Button } from '@/components'`)
+- ✅ Allowed: `features → hooks` (e.g., `import { useToggle } from '@/hooks/use-toggle'`)
+- ✅ Allowed: `features → lib` (e.g., `import { httpJson } from '@/lib/http'`)
+- ✅ Allowed: `features → utils` (e.g., `import { formatDate } from '@/utils/format-date'`)
+- ✅ Allowed: `features → stores` (e.g., `import { themeAtom } from '@/stores/theme.atoms'`)
+- ❌ Prohibited: `features → features` (strict isolation - prevents cross-feature coupling)
+- ❌ Prohibited: `features → app` (unidirectional codebase - features cannot depend on app layer)
+- ❌ Prohibited: Top-level directories (`api`, `components`, `hooks`, `lib`, `types`, `utils`, `stores`) → `features` (unidirectional - shared resources have no knowledge of features)
+- ❌ Prohibited: Top-level directories → `app` (unidirectional - shared resources have no knowledge of app layer)
 
 **Routing & Navigation (迷子防止)**:
 - URL definitions live in **one place only**: `app/Router.tsx`
-- Route entry points (screens) live in `features/*/pages/` or `domains/*/pages/`
-- Reusable components live in `features/*/components/` or `domains/*/components/`
-- When adding a new route: define it in `Router.tsx`, create the page component in the appropriate `pages/` directory
+- Route entry points (screens) live in `features/*/pages/`
+- Reusable components live in `features/*/components/` (feature-scoped) or `components/` (shared)
+- When adding a new route: define it in `Router.tsx`, create the page component in the appropriate `features/*/pages/` directory
 
 ### ESLint Configuration (Import Enforcement)
 
@@ -280,28 +332,23 @@ module.exports = {
           },
           // Add zones when features increase to maintain isolation
 
-          // Allow features → domains (cross-cutting domains are exempt)
-          // No restriction needed here - features CAN import from domains
-
-          // Enforce unidirectional codebase (prevent shared → features/app)
+          // Enforce unidirectional codebase (prevent top-level dirs → features/app)
           {
             target: [
-              './src/shared/components',
-              './src/shared/lib',
-              './src/shared/types',
+              './src/api',
+              './src/components',
+              './src/hooks',
+              './src/lib',
+              './src/types',
+              './src/utils',
+              './src/stores',
             ],
-            from: ['./src/features', './src/domains', './src/app'],
+            from: ['./src/features', './src/app'],
           },
 
           // Prevent features from importing from app layer
           {
             target: './src/features',
-            from: './src/app',
-          },
-
-          // Prevent domains from importing from app layer
-          {
-            target: './src/domains',
             from: './src/app',
           },
         ],
@@ -311,7 +358,7 @@ module.exports = {
 }
 ```
 
-**Note**: This configuration ensures features remain isolated while allowing controlled dependencies on cross-cutting domains.
+**Note**: This configuration ensures features remain strictly isolated while allowing them to depend on top-level shared directories.
 
 ### Prohibiting features/index.ts (Barrel Exports)
 
@@ -397,19 +444,23 @@ Side effects aggregated at: API layer (ApiError normalization), QueryClient (opt
 
 Server state via TanStack Query (required). No `useState + useEffect` for fetching. Use queryKey factories. Reactive updates via `invalidateQueries`.
 
-### 5. Unidirectional Codebase (shared → domains → features → app)
+### 5. Unidirectional Codebase (top-level directories → features → app)
 
-`shared/` has no dependencies on other layers. `domains/` depend only on `shared/`. `features/` depend on `shared/` and `domains/` (but not other features). `app/` composes everything.
+Top-level directories (`api/`, `components/`, `hooks/`, `lib/`, `types/`, `utils/`, `stores/`) have no dependencies on `features/` or `app/`. `features/` depend only on top-level directories (but not other features). `app/` composes everything.
 
 ```typescript
 // ✅ GOOD
-import { Card } from '@/shared/components'  // Barrel import from shared/components
-import { useUser } from '@/domains/auth'  // Cross-cutting domain OK (via index.ts)
-import type { Command } from '@/shared/types/commands'  // Shared types OK
+import { Card } from '@/components'  // Barrel import from components
+import { useUser } from '@/api/auth/auth.api'  // API OK
+import type { Command } from '@/types/commands'  // Shared types OK
+import type { User } from '@/types/auth'  // Shared entity types OK
+import { useToggle } from '@/hooks/use-toggle'  // Shared hooks OK
+import { httpJson } from '@/lib/http'  // Lib utilities OK
 
 // ❌ BAD
 import { useDashboard } from '@/features/dashboard'  // From another feature (PROHIBITED)
 import type { Command } from '@/app/events/types'  // From app layer (PROHIBITED)
+import type { Account } from '@/features/settings/types/accounts'  // From another feature (PROHIBITED)
 ```
 
 ---
@@ -431,10 +482,10 @@ import type { Command } from '@/app/events/types'  // From app layer (PROHIBITED
 **Rationale**: Mutations are explicit user actions (toast appropriate). Queries run in background (toast inappropriate). Success feedback is mutation-specific, so `onSuccess` is the right place.
 
 ```typescript
-// shared/lib/query-client.ts (TypeScript meta augmentation)
+// lib/query-client.ts (TypeScript meta augmentation)
 import { QueryClient, MutationCache } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ApiError } from '@/shared/lib/errors'
+import { ApiError } from '@/lib/errors'
 
 declare module '@tanstack/react-query' {
   interface Register {
@@ -469,13 +520,13 @@ export const queryClient = new QueryClient({
   },
 })
 
-// features/settings/data/departments/mutations.ts (EXAMPLE - useAddDepartment)
+// api/departments/mutations.ts (EXAMPLE - useAddDepartment)
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { departmentsApi } from '@/features/settings/data/departments/api'
-import { departmentsKeys } from '@/features/settings/data/departments/keys'
-import type { Department } from '@/features/settings/model/types'
-import type { Command } from '@/shared/types/commands'
+import { departmentsApi } from '@/api/departments/api'
+import { departmentsKeys } from '@/api/departments/keys'
+import type { Department } from '@/types/departments'
+import type { Command } from '@/types/commands'
 
 export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void }) {
   const queryClient = useQueryClient()
@@ -499,7 +550,7 @@ export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void 
 ### ApiError
 
 ```typescript
-// shared/lib/errors.ts
+// lib/errors.ts
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -520,8 +571,8 @@ export class ApiError extends Error {
 **Usage**: `httpJson` is for JSON request/response only. For FormData/Blob/URLSearchParams, use `fetch()` directly (FormData sets its own Content-Type with boundary).
 
 ```typescript
-// shared/lib/http.ts
-import { ApiError } from '@/shared/lib/errors'
+// lib/http.ts
+import { ApiError } from '@/lib/errors'
 
 export async function httpJson<T>(
   url: string,
@@ -585,29 +636,167 @@ export async function httpText(url: string, options?: RequestInit): Promise<stri
 
 ### API Client Example
 
-```typescript
-// features/settings/data/accounts/api.ts (EXAMPLE)
-import { httpJson } from '@/shared/lib/http'
-import type { Account } from '@/features/settings/model/types'
+**Option A: All-in-one file (Small resources <200 lines)**
 
-export const accountsApi = {
+```typescript
+// api/accounts/accounts.api.ts (EXAMPLE - All-in-one)
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { httpJson } from '@/lib/http'
+import type { Account } from '@/types/accounts'
+
+// API Client
+const accountsApi = {
   getAccounts: (signal?: AbortSignal) =>
-    httpJson<Account[]>('/api/settings/accounts', { signal }),
+    httpJson<Account[]>('/api/accounts', { signal }),
 
   deleteAccount: (id: string) =>
-    httpJson<void>(`/api/settings/accounts/${id}`, { method: 'DELETE' }),
+    httpJson<void>(`/api/accounts/${id}`, { method: 'DELETE' }),
 }
 
-// features/settings/data/departments/api.ts (EXAMPLE)
-import { httpJson } from '@/shared/lib/http'
-import type { Department, CreateDepartmentInput } from '@/features/settings/model/types'
+// Query Keys
+const accountsKeys = {
+  all: ['accounts'] as const,
+  list: () => [...accountsKeys.all, 'list'] as const,
+  detail: (id: string) => [...accountsKeys.all, id] as const,
+}
+
+// Queries
+export function useAccounts() {
+  return useQuery({
+    queryKey: accountsKeys.list(),
+    queryFn: ({ signal }) => accountsApi.getAccounts(signal),
+  })
+}
+
+// Mutations
+export function useDeleteAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: accountsApi.deleteAccount,
+    meta: { toastError: true },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: accountsKeys.list() })
+      toast.success('Account deleted')
+    },
+  })
+}
+```
+
+**Option B: Split files (Large resources >200 lines)**
+
+```typescript
+// api/departments/api.ts (EXAMPLE - API client only)
+import { httpJson } from '@/lib/http'
+import type { Department, CreateDepartmentInput } from '@/types/departments'
 
 export const departmentsApi = {
+  getDepartments: (signal?: AbortSignal) =>
+    httpJson<Department[]>('/api/departments', { signal }),
+
   addDepartment: (data: CreateDepartmentInput) =>
-    httpJson<Department>('/api/settings/departments', {
+    httpJson<Department>('/api/departments', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+}
+
+// api/departments/keys.ts
+export const departmentsKeys = {
+  all: ['departments'] as const,
+  list: () => [...departmentsKeys.all, 'list'] as const,
+}
+
+// api/departments/queries.ts
+import { useQuery } from '@tanstack/react-query'
+import { departmentsApi } from '@/api/departments/api'
+import { departmentsKeys } from '@/api/departments/keys'
+
+export function useDepartments() {
+  return useQuery({
+    queryKey: departmentsKeys.list(),
+    queryFn: ({ signal }) => departmentsApi.getDepartments(signal),
+  })
+}
+
+// api/departments/mutations.ts
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { departmentsApi } from '@/api/departments/api'
+import { departmentsKeys } from '@/api/departments/keys'
+import type { Command } from '@/types/commands'
+
+export function useAddDepartment(options?: { onCommand?: (cmd: Command) => void }) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: departmentsApi.addDepartment,
+    meta: { toastError: true },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: departmentsKeys.list() })
+      toast.success('Department added')
+      options?.onCommand?.({ type: 'NAVIGATE', to: `/departments/${data.id}` })
+    },
+  })
+}
+```
+
+**Option C: Auth API (Used by multiple features)**
+
+```typescript
+// api/auth/auth.api.ts (EXAMPLE - Cross-feature resource, all-in-one)
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { httpJson } from '@/lib/http'
+import type { User, LoginInput } from '@/types/auth'
+
+// API Client
+const authApi = {
+  getUser: (signal?: AbortSignal) =>
+    httpJson<User>('/api/auth/me', { signal }),
+
+  login: (data: LoginInput) =>
+    httpJson<User>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  logout: () =>
+    httpJson<void>('/api/auth/logout', { method: 'POST' }),
+}
+
+// Query Keys
+const authKeys = {
+  all: ['auth'] as const,
+  user: () => [...authKeys.all, 'user'] as const,
+}
+
+// Queries
+export function useUser() {
+  return useQuery({
+    queryKey: authKeys.user(),
+    queryFn: ({ signal }) => authApi.getUser(signal),
+    staleTime: Infinity,
+  })
+}
+
+// Mutations
+export function useLogin() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: authApi.login,
+    onSuccess: (user) => {
+      queryClient.setQueryData(authKeys.user(), user)
+    },
+  })
+}
+
+export function useLogout() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: authApi.logout,
+    onSuccess: () => {
+      queryClient.setQueryData(authKeys.user(), null)
+    },
+  })
 }
 ```
 
@@ -618,27 +807,33 @@ export const departmentsApi = {
 ### QueryKey Factory
 
 ```typescript
-// features/settings/data/accounts/keys.ts (EXAMPLE)
+// NOTE: For all-in-one files, keys are defined inline
+// For split files, keys are in separate files
+
+// api/accounts/keys.ts (EXAMPLE - split files)
 export const accountsKeys = {
-  all: ['settings', 'accounts'] as const,
+  all: ['accounts'] as const,
   list: () => [...accountsKeys.all, 'list'] as const,
   detail: (id: string) => [...accountsKeys.all, id] as const,
 }
 
-// features/settings/data/departments/keys.ts (EXAMPLE)
-export const departmentsKeys = {
-  all: ['settings', 'departments'] as const,
-  list: () => [...departmentsKeys.all, 'list'] as const,
+// api/auth/auth.api.ts (EXAMPLE - all-in-one file, keys inline)
+const authKeys = {
+  all: ['auth'] as const,
+  user: () => [...authKeys.all, 'user'] as const,
 }
 ```
 
 ### Query Hook (No Toast)
 
 ```typescript
-// features/settings/data/accounts/queries.ts (EXAMPLE - useAccounts)
+// NOTE: For all-in-one files, queries are defined inline (see API Client Example)
+// For split files, queries are in separate files
+
+// api/accounts/queries.ts (EXAMPLE - split files)
 import { useQuery } from '@tanstack/react-query'
-import { accountsApi } from '@/features/settings/data/accounts/api'
-import { accountsKeys } from '@/features/settings/data/accounts/keys'
+import { accountsApi } from '@/api/accounts/api'
+import { accountsKeys } from '@/api/accounts/keys'
 
 export function useAccounts() {
   return useQuery({
@@ -666,11 +861,15 @@ const { data: activeAccounts } = useQuery({
 **Optimistic UX**: Use `setQueryData` for immediate feedback (e.g., list operations where stale data is acceptable).
 
 ```typescript
-// features/settings/data/accounts/mutations.ts (EXAMPLE - useDeleteAccount)
+// NOTE: For all-in-one files, mutations are defined inline (see API Client Example)
+// Example: Optimistic update with split files
+
+// api/accounts/mutations.ts (EXAMPLE - useDeleteAccount with optimistic update)
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { accountsApi } from '@/features/settings/data/accounts/api'
-import { accountsKeys } from '@/features/settings/data/accounts/keys'
-import type { Account } from '@/features/settings/model/types'
+import { toast } from 'sonner'
+import { accountsApi } from '@/api/accounts/api'
+import { accountsKeys } from '@/api/accounts/keys'
+import type { Account } from '@/types/accounts'
 
 export function useDeleteAccount() {
   const queryClient = useQueryClient()
@@ -738,16 +937,16 @@ export function useDeleteAccount() {
 ### Command Pattern (Navigation)
 
 ```typescript
-// shared/types/commands.ts (EXAMPLE)
+// types/commands.ts (EXAMPLE)
 export type Command =
   | { type: 'NAVIGATE'; to: string }
   | { type: 'INVALIDATE_QUERY'; queryKey: unknown[] }
 
 // features/settings/pages/CreateDepartmentPage.tsx (EXAMPLE)
 import { useNavigate } from 'react-router-dom'
-import { useAddDepartment } from '@/features/settings/data/departments/mutations'
+import { useAddDepartment } from '@/api/departments/mutations'
 import { CreateDepartmentForm } from '@/features/settings/components/CreateDepartmentForm'
-import type { Command } from '@/shared/types/commands'
+import type { Command } from '@/types/commands'
 
 export function CreateDepartmentPage() {
   const navigate = useNavigate()
@@ -896,10 +1095,10 @@ export function UserEditPage() {
 
 ```typescript
 // features/settings/components/AccountList.tsx (EXAMPLE)
-import { useAccounts } from '@/features/settings/data/accounts/queries'
-import { useDeleteAccount } from '@/features/settings/data/accounts/mutations'
-import { Spinner, ErrorView } from '@/shared/components'
-import type { Account } from '@/features/settings/model/types'
+import { useAccounts } from '@/api/accounts/accounts.api'
+import { useDeleteAccount } from '@/api/accounts/accounts.api'
+import { Spinner, ErrorView } from '@/components'
+import type { Account } from '@/types/accounts'
 
 // Container: Subscribe + wire events
 export function AccountListContainer() {
@@ -1167,7 +1366,7 @@ function CodePanel({ code }: { code: string }) {
 ### Authentication (HttpOnly Cookies + CSRF)
 
 ```typescript
-// shared/lib/auth.tsx (EXAMPLE)
+// lib/auth.tsx (EXAMPLE)
 const getUser = async () => {
   const res = await fetch('/api/auth/me')  // Token via HttpOnly cookie
   if (!res.ok) return null
@@ -1190,7 +1389,7 @@ export const userQueryOptions = queryOptions({
 **⚠️ Server-Side Validation Required**: UI authorization checks (like `<Authorization>` component) are for UX only. The server MUST validate all permissions for every request—never trust client-side checks.
 
 ```typescript
-// shared/lib/authorization.tsx (EXAMPLE)
+// lib/authorization.tsx (EXAMPLE)
 export function Authorization({ allowedRoles, policyCheck, children }: AuthorizationProps) {
   const { data: user } = useUser()
   if (!user) return null
@@ -1250,7 +1449,7 @@ test('deletes account on click', async () => {
 - **File Size**: Target 100-200 lines, max 400 lines per `.ts`/`.tsx` file for readability
   - **If exceeding 400 lines**:
     - Components: Split into Container/Presenter or extract sub-components
-    - Data layer: Already organized by resource in `data/<resource>/` (api.ts, keys.ts, queries.ts, mutations.ts)
+    - API layer: Split all-in-one files into separate files (api.ts, keys.ts, queries.ts, mutations.ts)
     - Utils: Split by responsibility (e.g., `date.utils.ts`, `string.utils.ts`)
 
 ---
