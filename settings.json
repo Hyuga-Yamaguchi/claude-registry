@@ -48,25 +48,26 @@
   "spinnerVerbs": {
     "mode": "replace",
     "verbs": [
-      "You have a right to perform your prescribed duty, but you are not entitled to the fruits of action.",
-      "Perform your duty equipoised, O Arjuna, abandoning all attachment to success or failure. Such equanimity is called yoga.",
-      "Whenever and wherever there is a decline in religious practice, O descendant of Bharata, and a predominant rise of irreligion – at that time I descend Myself.",
-      "O son of Kuntī, the nonpermanent appearance of happiness and distress, and their disappearance in due course, are like the appearance and disappearance of winter and summer seasons. They arise from sense perception, O scion of Bharata, and one must learn to tolerate them without being disturbed.",
-      "The mind is restless, turbulent, obstinate and very strong, O Kṛṣṇa, and to subdue it, I think, is more difficult than controlling the wind.",
-      "One must deliver himself with the help of his mind, and not degrade himself. The mind is the friend of the conditioned soul, and his enemy as well.",
-      "For the soul there is neither birth nor death at any time. He is unborn, eternal, ever-existing and primeval. He is not slain when the body is slain.",
-      "Abandon all varieties of religion and just surrender unto Me. I shall deliver you from all sinful reactions. Do not fear.",
-      "But those who always worship Me with exclusive devotion, meditating on My transcendental form – to them I carry what they lack, and I preserve what they have.",
-      "When meditation is mastered, the mind is unwavering like the flame of a lamp in a windless place.",
-      "He who sees inaction in action and action in inaction is wise among men.",
-      "As a person puts on new garments, giving up old ones, the soul similarly accepts new material bodies, giving up the old and useless ones.",
-      "The self is never born, nor does it ever die; having once been, it never ceases to be.",
-      "A person who is not disturbed by happiness and distress and is steady in both is certainly eligible for liberation.",
-      "From anger comes delusion; from delusion, bewilderment of memory; from bewilderment of memory, loss of intelligence; and when intelligence is lost, one falls down again into the material pool.",
-      "Whatever action is performed by a great man, common men follow in his footsteps.",
-      "Better to live your own destiny imperfectly than to live an imitation of somebody else’s life with perfection.",
-      "The mind acts like an enemy for those who do not control it.",
-      "Those who are motivated only by desire for the fruits of action are miserable, for they are constantly anxious about the results of what they do."
+      "You have a right to duty, but not to its fruits",
+      "Perform duty with equanimity, abandoning attachment",
+      "The self-controlled soul finds peace in the Self",
+      "The mind is restless; steady it through practice",
+      "Surrendering all actions to Me, be free from desire",
+      "Unattached to results, ever content and independent",
+      "Set thy heart upon thy work, but never on its reward",
+      "The soul is unborn, eternal, changeless and ancient",
+      "One who is unattached finds perfect peace",
+      "Engage in battle with equanimity of mind",
+      "Yoga is skill in action, equanimity in all states",
+      "The disciplined self moves among sense objects",
+      "Neither agitated by pain nor longing for pleasure",
+      "Cut the doubts in your heart with the sword of knowledge",
+      "Abandoning attachment, perform actions as sacrifice",
+      "The soul is neither born nor does it ever die",
+      "Fixed in yoga, perform actions with balance",
+      "Focusing the mind and senses on the Supreme",
+      "One who sees inaction in action attains peace",
+      "With mind absorbed in Me, you shall overcome all"
     ]
   },
   "hooks": {
@@ -87,6 +88,16 @@
           {
             "type": "command",
             "command": "osascript -e 'display notification \"Question - Input Required\" with title \"Claude Code\" sound name \"Glass\"'"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Permission Required\" with title \"Claude Code\" sound name \"Glass\"'"
           }
         ]
       }
