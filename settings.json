@@ -68,5 +68,28 @@
       "The mind acts like an enemy for those who do not control it.",
       "Those who are motivated only by desire for the fruits of action are miserable, for they are constantly anxious about the results of what they do."
     ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Task Completed\" with title \"Claude Code\" sound name \"Hero\"'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Question - Input Required\" with title \"Claude Code\" sound name \"Glass\"'"
+          }
+        ]
+      }
+    ]
   }
 }
